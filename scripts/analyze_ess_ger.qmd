@@ -479,7 +479,7 @@ membership. Report it as median + 95% credible interval, and note
 positive — rather than reducing it to a single point estimate with a
 p-value.
 
-# Next steps
+# Next steps for this model
 
 - [x] ~~Restrict to voters only.~~ Done: `clean_ess_ger_simple()` drops
   non-voters (`pvote == NA`) instead of folding them into "not radical
@@ -504,3 +504,260 @@ p-value.
   `essger.rds` from raw ESS + the class scheme) into `R/` functions and
   targets too, so the whole pipeline — not just this model — is
   `tar_make()`-reproducible from raw ESS data.
+
+# Reverse model: Pr(worker | rightvote)
+
+The model above answers the *voter perspective* — Alford's ICV question,
+"are workers disproportionately likely to vote radical right?" The
+manuscript's other half is the *party perspective* — Axelrod's Contribution
+Index / Hooghe & Marks' PCI question, "what share of the radical-right
+electorate is made up of workers?" These are two sides of the same Bayes'
+rule identity (see `R/functions_derive.R::contribution()`), but rather than
+deriving one from the other analytically — which would require also
+modeling `Pr(rightvote)` and `Pr(worker)` as separate quantities with their
+own uncertainty — this fits the reverse regression directly: `worker` as
+the outcome, `rightvote` as the predictor, on its own likelihood. Both are
+equally legitimate "Bayesian models" of the same underlying joint
+distribution; fitting directly is simpler here because there is only one
+predictor and no adjustment question in view yet.
+
+Deliberately excludes age_grp/gender/immigrant/union: the goal stated for
+this model is the *unconditional* share of workers among radical-right
+voters (the direct analogue of Axelrod's and Hooghe & Marks' definitions,
+which are not covariate-adjusted either), not a demographics-adjusted
+version of it. Adding those controls back in would answer a different,
+also useful question — "net of age/gender/immigrant background/union
+membership, how much of the raw worker-share gap is a residual class
+effect?" — flagged as a next step, not done here.
+
+## Data
+
+Reuses the exact same finalized analysis sample as the model above (same
+`clean_ess_ger_simple()`, same N = 7,889): Germany, 2017 + 2021 Bundestag
+elections, voters only.
+
+```{r}
+#| label: reverse-data
+
+# Re-read essger.rds fresh rather than reusing `ess` from the sections
+# above: by this point `ess` carries the superseded rightvote/worker
+# columns from the btw>=2013, population-based exploration. clean_ess_ger_simple()
+# would overwrite them correctly either way, but starting fresh avoids any
+# doubt about which definition is in effect.
+source(here("R", "functions_clean.R"))
+essger_raw    <- readRDS(here("data", "processed", "essger.rds"))
+ess_model_rev <- clean_ess_ger_simple(essger_raw)
+nrow(ess_model_rev)
+```
+
+## Exploratory look at the focal contrast
+
+```{r}
+#| label: fig-eda-reverse
+#| fig-cap: "Worker share by vote choice, Germany 2017+2021 voters (raw sample proportions)."
+
+eda_reverse <- ess_model_rev %>%
+  group_by(rightvote) %>%
+  summarise(
+    n = n(),
+    p_worker = mean(worker),
+    se = sqrt(p_worker * (1 - p_worker) / n)
+  ) %>%
+  mutate(rightvote_lab = factor(rightvote, levels = c(0, 1), labels = c("Other/no radical-right vote", "Radical-right vote")))
+
+ggplot(eda_reverse, aes(x = rightvote_lab, y = p_worker)) +
+  geom_col(width = 0.5, fill = "grey40") +
+  geom_errorbar(aes(ymin = p_worker - 1.96 * se, ymax = p_worker + 1.96 * se), width = 0.1) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    x = NULL, y = "Worker share",
+    title = "Raw (unadjusted) worker-share gap by vote choice"
+  ) +
+  my_theme()
+```
+
+The raw gap — roughly 38% among other voters vs. 59% among radical-right
+voters, an odds ratio of about 2.3 — is unusually large for a single
+demographic predictor, but is consistent with how strongly class-based the
+literature on West European radical-right electorates finds this
+particular divide to be; it is the benchmark the priors below are checked
+against, not fit to.
+
+## The model
+
+$$
+\text{worker}_i \sim \text{Bernoulli}(p_i)
+$$
+$$
+\text{logit}(p_i) = \alpha + \beta_{\text{rightvote}} \cdot \text{rightvote}_i
+$$
+
+Same `0 + Intercept` parameterization as the forward model, so `alpha` is
+the literal log-odds of being a worker among non-radical-right voters (the
+reference level), not brms's internally-centered intercept.
+
+### Priors
+
+| Parameter | Prior | Rationale |
+|---|---|---|
+| `alpha` (Intercept, worker share among non-RR voters) | `Normal(-0.3, 1)` | `logit(-0.3) ≈ 43%`. Workers are a large minority, not a majority, of contemporary West European electorates under class schemes like the one used here (consistent with this project's own earlier, broader-sample worker-share estimates of ~44-50% in `scripts/analyze_ess_ger.qmd`'s exploratory data, though that is a different subsample from the one used to fit this model, so this is a plausibility check rather than an empirical-Bayes prior). SD = 1 puts 95% prior mass on `Pr(worker \| rightvote=0)` between 10% and 84% — wide, deliberately not fit to this specific sample's 37.7%. |
+| `beta_rightvote` | `Normal(0, 0.75)` | Wider than the demographic-control priors in the forward model (`Normal(0, 0.5)`) because this coefficient is not a nuisance control here — it is the very relationship the model exists to estimate, and the class divide in radical-right electorates is one of the more robust *large* effects in this literature (not a small nudge like the immigrant/union coefficients in the forward model). 95% prior mass on the odds ratio is roughly [0.23, 4.3], comfortably covering the raw sample OR of ~2.3 without presupposing it (`P(contrast > 0) = 0.50` under the prior, checked below). |
+
+```{r}
+#| label: reverse-set-priors
+
+reverse_formula <- bf(worker ~ 0 + Intercept + rightvote)
+
+reverse_priors <- c(
+  prior(normal(-0.3, 1), class = "b", coef = "Intercept"),
+  prior(normal(0, 0.75), class = "b", coef = "rightvote")
+)
+```
+
+### Prior predictive check (analytic)
+
+```{r}
+#| label: reverse-prior-predictive-analytic
+
+set.seed(2026)
+n_sim <- 20000
+alpha       <- rnorm(n_sim, -0.3, 1)
+b_rightvote <- rnorm(n_sim, 0, 0.75)
+
+p_nonrv  <- plogis(alpha)
+p_rv     <- plogis(alpha + b_rightvote)
+contrast <- p_rv - p_nonrv
+
+qs <- function(x) round(quantile(x, c(.025, .25, .5, .75, .975)), 4)
+
+tibble(quantity = c(
+  "Pr(worker | rightvote=0)",
+  "Pr(worker | rightvote=1) -- the requested quantity",
+  "Contrast: Pr(worker|rightvote=1) - Pr(worker|rightvote=0)"
+)) %>%
+  bind_cols(map_dfr(list(p_nonrv, p_rv, contrast), ~ as_tibble_row(qs(.x)))) %>%
+  gt() %>%
+  fmt_number(columns = -quantity, decimals = 3)
+
+cat("P(contrast > 0):", mean(contrast > 0), "\n")
+cat("P(Pr(worker|rightvote=1) > 0.95):", mean(p_rv > 0.95), "\n")
+cat("P(Pr(worker|rightvote=1) < 0.05):", mean(p_rv < 0.05), "\n")
+```
+
+The prior-predictive contrast is centered at 0 (not presupposing a
+direction) with a 95% interval of roughly [-28, +30] percentage points,
+comfortably bracketing the raw sample gap of +21 points; implausible
+extremes (`Pr(worker) > 95%` or `< 5%`) get well under 2% of prior mass
+each.
+
+### Canonical brms check and fit
+
+```{r}
+#| label: reverse-prior-predictive-brms
+#| eval: false
+
+fit_rev_prior_only <- brm(
+  formula = reverse_formula,
+  data    = ess_model_rev,
+  family  = bernoulli(),
+  prior   = reverse_priors,
+  sample_prior = "only",
+  chains = 4, cores = 4, iter = 2000, seed = 2026,
+  file = here("models", "m_ger_reverse_prior_only")
+)
+
+pp_check(fit_rev_prior_only, ndraws = 100) +
+  labs(title = "Prior predictive check: worker ~ rightvote")
+```
+
+```{r}
+#| label: reverse-fit-model
+#| eval: false
+
+fit_rev <- brm(
+  formula = reverse_formula,
+  data    = ess_model_rev,
+  family  = bernoulli(),
+  prior   = reverse_priors,
+  chains = 4, cores = 4, iter = 2000, seed = 2026,
+  file = here("models", "m_ger_reverse")
+)
+```
+
+### Diagnostics
+
+```{r}
+#| label: reverse-diagnostics
+#| eval: false
+
+summary(fit_rev)
+posterior::summarise_draws(fit_rev, "rhat", "ess_bulk", "ess_tail")
+
+pp_check(fit_rev, ndraws = 100)
+pp_check(fit_rev, type = "stat_grouped", group = "rightvote", stat = "mean")
+```
+
+As with the forward model: check `Rhat < 1.01` and bulk/tail ESS before
+trusting anything below, and inspect the grouped posterior predictive check
+yourself rather than taking this notebook's word for it.
+
+## Focal result: the share of workers among radical-right voters
+
+```{r}
+#| label: reverse-focal-result
+#| eval: false
+
+worker_share_draws <- tibble(rightvote = c(0, 1)) %>%
+  add_epred_draws(fit_rev) %>%
+  ungroup()
+
+worker_share_draws %>%
+  mutate(rightvote_lab = factor(rightvote, levels = c(0, 1), labels = c("Other/no radical-right vote", "Radical-right vote"))) %>%
+  ggplot(aes(x = .epred, y = rightvote_lab, fill = rightvote_lab)) +
+  stat_halfeye(alpha = 0.7) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_viridis_d(guide = "none") +
+  labs(
+    x = "Posterior Pr(worker)", y = NULL,
+    title = "Posterior share of workers, by vote choice"
+  ) +
+  my_theme()
+
+worker_share_among_rr <- worker_share_draws %>%
+  filter(rightvote == 1) %>%
+  summarise(
+    median = median(.epred),
+    q025 = quantile(.epred, .025),
+    q975 = quantile(.epred, .975)
+  )
+worker_share_among_rr
+```
+
+`worker_share_among_rr` is the answer to the question this section set out
+to answer: the posterior-median predicted share of workers among
+radical-right voters, with a 95% credible interval — report it that way
+(e.g. "an estimated X% [95% CI: Y-Z%] of radical-right voters are workers"),
+not as a single point estimate. This is the fully Bayesian analogue of
+Axelrod's Contribution Index / Hooghe & Marks' PCI's core quantity
+(`Pr(worker | party)`); subtracting the population worker share (`Pr(worker)`,
+~38.9% in this sample) from it recovers a PCI-like differential, though a
+fully rigorous posterior for that subtraction should also propagate
+`Pr(worker)`'s own sampling uncertainty rather than treating it as a fixed
+number — left as a next step, not done here.
+
+# Next steps for the reverse model
+
+- Run `targets::tar_make()`-style fitting locally (Stan toolchain required)
+  and replace the `eval: false` chunks' placeholders with real posterior
+  output.
+- Once satisfied, promote `worker ~ rightvote` the same way the forward
+  model was promoted: a `clean` step is already shared
+  (`clean_ess_ger_simple()`), so this mainly means adding
+  `fit_model_ger_reverse()` to `R/functions_model.R` and a
+  `model_ger_reverse` target to `_targets.R`.
+- Decide whether to build the full posterior PCI (`Pr(worker|rightvote) -
+  Pr(worker)`, both terms with their own posterior uncertainty, combined
+  draw-by-draw) rather than subtracting a fixed population share.
+- Consider adding age_grp/gender/immigrant/union back in to decompose how
+  much of the raw worker-share gap survives adjustment for demographic
+  composition, once ready to ask that (different, adjusted) question.

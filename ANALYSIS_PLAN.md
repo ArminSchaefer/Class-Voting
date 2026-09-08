@@ -15,6 +15,16 @@ country *c* and ESS round *r*:
 - **ICV**: `Pr(vote_j | worker, c, r) - Pr(vote_j | ~worker, c, r)`
 - **PCI**: `Pr(worker | vote_j, c, r) - Pr(worker, c, r)`
 
+Status (2026-09-08): both directions now have a concrete single-country
+(Germany, 2017+2021) simple-model implementation in
+`scripts/analyze_ess_ger.qmd`, each fit as its own direct regression rather
+than derived from the other via Bayes' rule -- `rightvote ~ worker + ...`
+for loyalty (promoted to `R/functions_model.R::fit_model_ger_simple()`),
+`worker ~ rightvote` for contribution (still notebook-only). Neither is
+covariate-adjusted by design for the contribution direction (Axelrod/PCI's
+own definitions aren't either); the by-country/by-round posterior indices
+in section 6 below remain the target once this moves past Germany-only.
+
 Each of these is currently computed in the manuscript as a **point estimate**
 from cross-tabulated proportions. The Bayesian extension below produces a
 **posterior distribution** for each, by country and round, so that (a)

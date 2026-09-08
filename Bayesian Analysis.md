@@ -83,6 +83,7 @@ The Bayesian analyses are based in particular on:
 ### 4. Code Standards
 
 - Provide **idiomatic, reproducible R code** when relevant.
+- Use native pipe |> throughout
 - Ensure compatibility with:
   - `tidyverse`
   - `ggdist`

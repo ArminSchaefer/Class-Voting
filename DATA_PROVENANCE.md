@@ -69,6 +69,14 @@ what lets someone (including future-you) audit *why* a case was coded as
   simplification to revisit with multiple imputation once the model
   specification is settled.
 
+- **Reverse model (party perspective)** (`scripts/analyze_ess_ger.qmd`,
+  section "Reverse model: Pr(worker | rightvote)"): `worker ~ rightvote`,
+  same `rightvote`/`worker` definitions and same Germany 2017+2021
+  voters-only sample as `clean_ess_ger_simple()` (N = 7,889), just with the
+  outcome and predictor roles swapped and no other covariates. Not yet
+  promoted to `R/`/`_targets.R` — still in the notebook pending the same
+  model-checking step the forward model went through.
+
 ## Codebooks
 
 Store the relevant ESS codebook excerpts / question wording for the variables
