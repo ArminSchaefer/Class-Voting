@@ -1,0 +1,282 @@
+---
+title: "Process ESS Germany"
+author:
+  - name: Armin Schäfer
+    affiliation:
+      - id: jgu
+        name: Johannes Gutenberg University
+    orcid: 0000-0002-2538-0092
+    email: schaefer@politik.uni-mainz.de
+format: 
+  html:
+    number-sections: false
+    code-fold: true
+    code-summary: "Show the code"
+    self-contained: true
+embed-resources: true
+---
+
+# Preparation
+
+## Packages and appearance
+
+```{r}
+#| label: setup
+#| echo: true
+#| message: false
+#| warning: false
+
+if (!require("pacman")) {
+  install.packages("pacman")
+  library(pacman)
+}
+p_load(here, survey, srvyr, rio, tidyverse)
+
+options(rio.import.trust = TRUE)
+
+```
+
+## Load total data set
+
+```{r}
+#| label: getdata
+#| message: false
+
+ess_ger_total <- import(here("data", "raw", "ess_ger_total.csv"))
+
+ess_class_scheme <- import(here("data", "processed", "ess_class_scheme.rds"))
+ess_ger_parties  <- import(here("data", "processed", "ess_ger_parties.rds"))
+
+ess_ger_total <- merge(ess_ger_total, ess_class_scheme, by = c("essround", "idno"))
+ess_ger_total <- merge(ess_ger_total, ess_ger_parties,  by = c("essround", "idno"))
+
+```
+
+## Recode variables
+```{r}
+#| label: recoding
+
+missings_low <- c(6, 7, 8, 9)
+fix_na_low <- function(x) {
+  if_else(x %in% missings_low, NA, x)
+}
+
+missings_high <- c(77, 88, 99)
+fix_na_high <- function(x) {
+  if_else(x %in% missings_high, NA, x)
+}
+
+essger <- ess_ger_total %>%
+  mutate(
+    year = case_when(
+      essround == 1 ~ 2002,
+      essround == 2 ~ 2004,
+      essround == 3 ~ 2006,
+      essround == 4 ~ 2008,
+      essround == 5 ~ 2010,
+      essround == 6 ~ 2012,
+      essround == 7 ~ 2014,
+      essround == 8 ~ 2016,
+      essround == 9 ~ 2018,
+      essround == 10 ~ 2020,
+      essround == 11 ~ 2022
+    ),
+    btw = case_when(
+      essround == 1 | essround == 2 ~ 2002,
+      essround == 3 | essround == 4 ~ 2005,
+      essround == 5 | essround == 6 ~ 2009,
+      essround == 7 | essround == 8 ~ 2013,
+      essround == 9 | essround == 10 ~ 2017,
+      essround == 11 ~ 2021
+    ),
+    age = ifelse(agea < 999, agea, NA),
+    age_grp = case_when(
+      agea >= 17 & agea <= 29 ~ "18-29",
+      agea >= 30 & agea <= 65 ~ "30-65",
+      agea >= 66 ~ "66+"
+    ),
+    cohort = case_when(
+      yrbrn <= 1925 ~ "interwar",
+      yrbrn >= 1926 & yrbrn <= 1945 ~ "postwar",
+      yrbrn >= 1946 & yrbrn <= 1957 ~ "60-70s",
+      yrbrn >= 1958 & yrbrn <= 1968 ~ "80s",
+      yrbrn >= 1969 & yrbrn <= 1979 ~ "90s",
+      yrbrn >= 1980 & yrbrn <= 2009 ~ "millennial"
+    ),
+    cohort = factor(
+      cohort,
+      levels = c(
+        "interwar", "postwar",
+        "60-70s", "80s", "90s", "millennial"
+      )
+    ),
+    gender = case_when(
+      gndr == 1 ~ "male",
+      gndr == 2 ~ "female"
+    ),
+    edua = case_when(
+      edulvla == 1 | edulvla == 2 ~ "(below) lower secondary",
+      edulvla == 3 | edulvla == 4 ~ "upper secondary",
+      edulvla == 5 ~ "tertiary"
+    ),
+    edub = case_when(
+      edulvlb < 230 ~ "(below) lower secondary",
+      edulvlb > 299 & edulvlb < 424 ~ "upper secondary",
+      edulvlb > 499 & edulvlb < 801 ~ "tertiary"
+    ),
+    education = ifelse(is.na(edua), edub, edua),
+    education = factor(
+      education,
+      levels = c(
+        "(below) lower secondary",
+        "upper secondary",
+        "tertiary"
+      )
+    ),
+    edu_cat = case_when(
+      education == "(below) lower secondary" ~ "low",
+      education == "upper secondary" ~ "medium",
+      education == "tertiary" ~ "high"
+    ),
+    edu_cat = factor(
+      edu_cat,
+      levels = c(
+        "low", "medium", "high"
+      )
+    ),
+    height = ifelse(height < 777, height, NA),
+    immigrant = case_when(
+      brncntr == 1 & facntr == 1 & mocntr == 1 ~ 0,
+      brncntr == 2 | facntr == 2 | mocntr == 2 ~ 1
+    ),
+    att_immigrants = 11-imwbcnt,
+    union = case_when(
+      mbtru == 1 ~ 1,
+      mbtru == 2 | mbtru == 3 ~ 0
+    ),
+    lrscale = ifelse(lrscale >10, NA, lrscale),
+    pid = case_when(
+      clsprty == 1 ~ 1,
+      clsprty == 2 ~ 0
+    ),
+    cut_work = 6 - wmcpwrk,
+  ) %>%
+  mutate(across(c(
+    freehms, wmcpwrk, polintr, cptppola, psppsgva, psppipla,
+    badge, sgnptit, pbldmna, bctprd, pstplonl, contplt,
+    volunfp), fix_na_low)) %>%
+  mutate(freehms = 6 - freehms) %>%
+  mutate(across(c(imueclt, gvcldcr, cldcrsv, euftf,
+                  trstplt, trstprt, trstprt, stfdem, att_immigrants), fix_na_high),
+    inteff = cptppola,
+    exteff = 6-psppipla,
+    polint = 5 - polintr,
+    voted = case_when(
+      vote == 1 ~ 1,
+      vote == 2 ~ 0
+    ),
+    class5fac = factor(
+      class5fac,
+      levels = c(
+        "Low-skilled workers",
+        "Skilled workers",
+        "Small business",
+        "Lower-grade service class",
+        "Higher-grade service class"
+      )
+    ),
+    across(c(badge, sgnptit, pbldmna, bctprd, pstplonl, volunfp, contplt), 
+           ~ if_else(. == 1, 1, 0)
+           )
+    )
+
+essger <- essger %>%
+  dplyr::select(
+    idno, essround, year, btw, voted, pvote, pvote_non_voter,
+    age, yrbrn, cohort, age_grp, gender, education, edu_cat,
+    starts_with("class"), height, immigrant, union, psppipla, psppsgva, att_immigrants,
+    lrscale, polint, pid, inteff,  exteff, trstplt, trstprt, trstprl, stfdem,
+    badge, sgnptit, pbldmna, bctprd, pstplonl, contplt, volunfp, pspwght) %>% 
+  filter(!is.na(pvote_non_voter), !is.na(pspwght)) %>% 
+  mutate(pvote_non_voter = factor(pvote_non_voter),
+         btw_str = as.character(btw))
+
+# Create weight to adust pvote to actual votes (including nonvoters!)
+
+# Define actual vote shares for each election year
+actual_shares <- list(
+  `2002` = data.frame(pvote_non_voter = c("christian democrats", "greens", "liberals", "nonvoter", "radical left", "radical right", "social democrats"), 
+                      Freq = c(0.314, 0.0701, 0.0603, 0.209, 0.0326, 0.0, 0.314)),
+  `2005` = data.frame(pvote_non_voter = c("christian democrats", "greens", "liberals", "nonvoter", "radical left", "radical right", "social democrats"), 
+                      Freq = c(0.2849, 0.0656, 0.0793, 0.223, 0.0704, 0.0, 0.2768)),
+  `2009` = data.frame(pvote_non_voter = c("christian democrats", "greens", "liberals", "nonvoter", "radical left", "radical right", "social democrats"), 
+                      Freq = c(0.257, 0.0814, 0.111, 0.292, 0.0837, 0.0, 0.1749)),
+  `2013` = data.frame(pvote_non_voter = c("christian democrats", "greens", "liberals", "nonvoter", "radical left", "radical right", "social democrats"), 
+                      Freq = c(0.3167, 0.0641, 0.0366, 0.285, 0.0656, 0.0359, 0.1961)),
+  `2017` = data.frame(pvote_non_voter = c("christian democrats", "greens", "liberals", "nonvoter", "radical left", "radical right", "social democrats"), 
+                      Freq = c(0.2644, 0.0715, 0.086, 0.238, 0.0739, 0.1013, 0.1648)),
+  `2021` = data.frame(pvote_non_voter = c("christian democrats", "greens", "liberals", "nonvoter", "radical left", "radical right", "social democrats"), 
+                      Freq = c(0.203, 0.1233, 0.0956, 0.234, 0.0411, 0.0873, 0.2156))  
+  )
+
+rake_by_year <- function(subset_data) {
+  btw_str <- as.character(unique(subset_data$btw))
+  
+  if (!btw_str %in% names(actual_shares)) {
+    stop(paste("Error: No vote shares found for year", btw_str))
+  }
+  
+  actual_shares_filtered <- actual_shares[[btw_str]]
+  
+  # Ensure only matched categories are used
+  subset_data <- subset_data[subset_data$pvote_non_voter %in% actual_shares_filtered$pvote_non_voter, ]
+  actual_shares_filtered <- actual_shares_filtered[actual_shares_filtered$pvote_non_voter %in% subset_data$pvote_non_voter, ]
+  
+  # Check for missing strata
+  sample_levels <- unique(subset_data$pvote_non_voter)
+  population_levels <- unique(actual_shares_filtered$pvote_non_voter)
+  missing_levels <- setdiff(sample_levels, population_levels)
+
+  if (length(missing_levels) > 0) {
+    stop(paste("Error: The following levels are in the sample but missing from actual_shares:", 
+               paste(missing_levels, collapse = ", ")))
+  }
+  
+  # Ensure population data is not empty
+  if (nrow(actual_shares_filtered) == 0) {
+    stop(paste("Error: No matching population data for year", btw_str))
+  }
+
+  # Ensure factors have the same levels
+  all_levels <- unique(unlist(lapply(actual_shares, function(x) x$pvote_non_voter)))
+  subset_data$pvote_non_voter <- factor(subset_data$pvote_non_voter, levels = all_levels)
+  actual_shares_filtered$pvote_non_voter <- factor(actual_shares_filtered$pvote_non_voter, levels = all_levels)
+
+  design <- svydesign(ids = ~1, weights = ~pspwght, data = subset_data)
+  
+  design_raked <- rake(
+    design,
+    sample.margins = list(~pvote_non_voter),
+    population.margins = list(actual_shares_filtered)
+  )
+  
+  subset_data$vote_weight <- weights(design_raked)
+  return(subset_data)
+}
+
+essger <- essger %>% group_split(btw) %>% lapply(rake_by_year) %>% bind_rows()
+
+essger11 <- essger %>% filter(essround == 11)
+saveRDS(essger11, here("data", "essger11.rds"))
+
+# Define the survey design
+essger_weighted <- essger %>% as_survey_design(strata = essround, weights = vote_weight)
+
+# survey weighted mean ov voted
+test1 <- essger_weighted %>% summarise(survey_mean(voted, na.rm = TRUE))
+weighted.mean(essger$voted, essger$vote_weight, na.rm = TRUE)
+
+saveRDS(essger, here("data", "processed", "essger.rds"))
+saveRDS(essger_weighted, here("data", "processed", "essger_weighted.rds"))
+
+```

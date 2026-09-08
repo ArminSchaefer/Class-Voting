@@ -1,0 +1,456 @@
+---
+title: "Voting for the Radical Right in Germany: A First Bayesian Model"
+subtitle: "Pr(rightvote | worker) — priors, prior predictive checks, and a simple hierarchical-free logistic model"
+author:
+  - name: Armin Schäfer
+    affiliation:
+      - id: jgu
+        name: Johannes Gutenberg University
+format:
+  html:
+    number-sections: true
+    code-fold: true
+    code-summary: "Show the code"
+    self-contained: true
+    toc: true
+highlight-style: tango
+execute:
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+#| echo: false
+#| message: false
+#| warning: false
+
+if (!require("pacman")) {
+  install.packages("pacman")
+  library(pacman)
+}
+
+p_load(here, tidyverse, brms, tidybayes, ggdist, posterior, bayesplot, loo, marginaleffects, gt)
+
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis",
+  dplyr.summarise.inform = FALSE,
+  mc.cores = parallel::detectCores()
+)
+
+my_theme <- function(...) {
+  theme(
+    plot.title = element_text(color = "black", size = 12, face = "bold"),
+    axis.text = element_text(color = "black", size = 10),
+    axis.title = element_text(color = "black", face = "bold", size = 10),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "white", color = "grey70"),
+    strip.text = element_text(color = "black"),
+    legend.key.size = unit(0.3, "cm")
+  )
+}
+```
+
+# Purpose and scope
+
+This notebook develops the *first, deliberately simple* Bayesian model in the
+"from Bayes' rule to Bayesian estimation" workflow (see `ANALYSIS_PLAN.md`):
+a single-country (Germany), non-hierarchical logistic regression of voting
+for the radical right on worker status, with age, gender, immigrant
+background, and union membership as controls. The substantive focus is the
+posterior for `Pr(rightvote | worker)` versus `Pr(rightvote | non-worker)` —
+the model-based, covariate-adjusted analogue of the manuscript's closed-form
+Alford Index (`icv()` in `R/functions_derive.R`).
+
+This is a **descriptive/associational** model: `worker` is an observed
+occupational-class status, not a randomized treatment, so the coefficient on
+`worker` should be read as an adjusted association net of age, gender,
+immigrant background, and union membership — not a causal effect of "being a
+worker" on vote choice.
+
+Recoding logic here is exploratory (per `scripts/` convention); once
+settled, it should move into `R/functions_clean.R` (`clean_ess()`) and
+`R/functions_model.R` (replacing the `fit_model_pooled()` stub), and this
+model becomes a `_targets.R` target rather than living only in this
+notebook.
+
+# Data and variable construction
+
+```{r}
+#| label: load-data
+
+ess <- readRDS(here("data", "processed", "essger.rds"))
+nrow(ess)
+```
+
+## Outcome: `rightvote`
+
+The cleaned data provide `pvote_non_voter`, a party-choice variable that
+already recodes non-voters into their own `"nonvoter"` category rather than
+leaving them as `NA` (as plain `pvote` does). We use this population-based
+coding — matching the manuscript's own framing of loyalty/contribution as
+shares of the *population*, not just of voters — so `rightvote` compares
+radical-right voters against everyone else, voters and non-voters alike. A
+voters-only version of this model (dropping non-voters from the sample) is a
+natural robustness check but is not the primary specification here.
+
+```{r}
+#| label: construct-rightvote
+
+ess <- ess %>%
+  mutate(
+    rightvote = case_when(
+      is.na(pvote_non_voter) ~ NA_real_,
+      as.character(pvote_non_voter) == "radical right" ~ 1,
+      TRUE ~ 0
+    )
+  )
+
+count(ess, rightvote)
+```
+
+## Focal predictor: `worker`
+
+`class5` is a five-category class scheme (Higher-grade service class /
+Lower-grade service class / Small business / Skilled workers / Low-skilled
+workers) derived upstream in `data/processed/class_scheme.rds` from detailed
+occupational coding. Following Alford's (and Oesch's) definition of the
+manual working class, `worker` combines the two manual-worker categories:
+
+```{r}
+#| label: construct-worker
+
+ess <- ess %>%
+  mutate(
+    worker = case_when(
+      is.na(class5) ~ NA_real_,
+      class5 %in% c(4, 5) ~ 1,   # Skilled workers, Low-skilled workers
+      TRUE ~ 0                    # Higher/Lower-grade service class, Small business
+    )
+  )
+
+count(ess, worker, class5fac)
+```
+
+## A critical restriction: pre-2013 elections had (almost) no radical-right vote
+
+The AfD was founded in 2013 and did not enter the Bundestag until 2017;
+earlier German radical-right parties (Republikaner, NPD, DVU) polled far
+below the threshold this coding scheme picks up. Pooling all eleven ESS
+rounds (2002–2021) would silently mix elections in which "voting radical
+right" was barely a live option with elections in which it was a major
+choice — an identifying assumption that must be made explicit, not buried in
+a pooled average:
+
+```{r}
+#| label: check-pre-afd
+
+ess %>%
+  group_by(btw) %>%
+  summarise(n = n(), pct_rightvote = round(100 * mean(rightvote, na.rm = TRUE), 2))
+```
+
+Rightvote is exactly (or essentially) zero for 2002–2009. We therefore
+restrict this first model to the AfD-era elections, 2013 onward. This drops
+roughly half the sample but avoids building a model on three elections in
+which the outcome was structurally impossible.
+
+```{r}
+#| label: restrict-sample
+
+ess_afd_era <- ess %>% filter(btw >= 2013)
+nrow(ess_afd_era)
+```
+
+## Reference categories and missingness
+
+```{r}
+#| label: recode-factors
+
+ess_afd_era <- ess_afd_era %>%
+  mutate(
+    age_grp = factor(age_grp, levels = c("18-29", "30-65", "66+")),
+    gender  = factor(gender,  levels = c("female", "male"))
+  )
+
+analysis_vars <- c("rightvote", "worker", "age_grp", "gender", "immigrant", "union")
+
+n_before <- nrow(ess_afd_era)
+ess_model <- ess_afd_era %>%
+  drop_na(all_of(analysis_vars))
+n_after <- nrow(ess_model)
+
+tibble(
+  n_before_listwise_deletion = n_before,
+  n_after = n_after,
+  pct_dropped = round(100 * (1 - n_after / n_before), 1)
+)
+```
+
+Reference categories: `worker = 0` (non-worker), `age_grp = "18-29"`,
+`gender = "female"`, `immigrant = 0`, `union = 0`. Missingness is
+concentrated in `class5`/`worker` (occupational class is unavailable for
+respondents outside the labour force); listwise deletion is a simplification
+worth revisiting with multiple imputation once the model specification is
+settled, but is acceptable for this first pass.
+
+# Exploratory look at the focal contrast
+
+```{r}
+#| label: fig-eda-worker
+#| fig-cap: "Radical-right vote share by worker status, Germany 2013-2021 (raw sample proportions, unadjusted for other covariates)."
+
+eda_worker <- ess_model %>%
+  group_by(worker) %>%
+  summarise(
+    n = n(),
+    p_rightvote = mean(rightvote),
+    se = sqrt(p_rightvote * (1 - p_rightvote) / n)
+  ) %>%
+  mutate(worker_lab = factor(worker, levels = c(0, 1), labels = c("Non-worker", "Worker")))
+
+ggplot(eda_worker, aes(x = worker_lab, y = p_rightvote)) +
+  geom_col(width = 0.5, fill = "grey40") +
+  geom_errorbar(aes(ymin = p_rightvote - 1.96 * se, ymax = p_rightvote + 1.96 * se), width = 0.1) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    x = NULL, y = "Radical-right vote share",
+    title = "Raw (unadjusted) worker gap in radical-right voting"
+  ) +
+  my_theme()
+```
+
+This raw gap (roughly 3.5% vs. 6.5%, i.e. an unadjusted difference of about
+3 percentage points, or an odds ratio of about 1.9) is the empirical
+benchmark the priors below are checked against — priors are not fit to this
+number, but should not rule it out a priori.
+
+# The model
+
+$$
+\text{rightvote}_i \sim \text{Bernoulli}(p_i)
+$$
+$$
+\text{logit}(p_i) = \alpha + \beta_{\text{worker}} \cdot \text{worker}_i +
+\beta_{\text{age30-65}} \cdot \text{age30-65}_i + \beta_{\text{age66+}} \cdot \text{age66+}_i +
+\beta_{\text{male}} \cdot \text{male}_i + \beta_{\text{immigrant}} \cdot \text{immigrant}_i +
+\beta_{\text{union}} \cdot \text{union}_i
+$$
+
+No group-level (multilevel) structure is included at this stage: single
+country, and the goal is a deliberately simple baseline before adding
+country/round structure (see `ANALYSIS_PLAN.md`, models M1–M2). We use
+brms's `0 + Intercept` parameterization so that `alpha` is the literal
+log-odds for the reference respondent (young, non-worker, female,
+non-immigrant, non-union) rather than brms's default internally-centered
+intercept — this keeps the Intercept prior directly interpretable.
+
+## Priors
+
+| Parameter | Prior | Rationale |
+|---|---|---|
+| `alpha` (Intercept, reference respondent) | `Normal(-3, 1)` | `logit(-3) ≈ 4.7%`. AfD's actual national vote shares in 2013/2017/2021 were 4.7% / 12.6% / 10.3%; a young, non-worker, female, non-immigrant, non-union respondent is on the *low* end of that range on every dimension the model estimates, so centering below the national average is deliberate. SD = 1 puts 95% prior mass on `Pr(rightvote)` between 0.7% and 27% for this reference group — wide enough not to fight the data, tight enough to rule out the model treating >50% as remotely plausible a priori (well under 1% of prior mass, checked below). |
+| `beta_worker` | `Normal(0, 0.5)` | Class-voting effects in the literature are moderate, not extreme. 95% prior mass on the odds ratio is roughly [0.37, 2.7] — allows the raw ~1.9 odds ratio above comfortably without presupposing it. |
+| `beta_age30-65`, `beta_age66+` | `Normal(0, 0.5)` | Same weakly-informative logic; no specific directional expectation for age net of the other covariates. |
+| `beta_male` | `Normal(0, 0.5)` | The gender gap in radical-right voting is one of the most robust findings in this literature and is likely to be at least as large as the worker gap; the same weakly-informative prior is used here deliberately, so that if the posterior for `beta_male` ends up needing to move further than for `beta_worker`, that is the *data* saying so, not the prior. |
+| `beta_immigrant`, `beta_union` | `Normal(0, 0.5)` | Same weakly-informative default; the raw data show near-null unadjusted gaps for both, which this prior does not rule out. |
+
+```{r}
+#| label: set-priors
+
+model_formula <- bf(rightvote ~ 0 + Intercept + worker + age_grp + gender + immigrant + union)
+
+model_priors <- c(
+  prior(normal(-3, 1), class = "b", coef = "Intercept"),
+  prior(normal(0, 0.5), class = "b")
+)
+```
+
+## Prior predictive check
+
+Before fitting to real outcomes, two checks: a fast analytic simulation
+(no Stan compilation needed, useful for quickly trying alternative prior
+widths), then the canonical brms `sample_prior = "only"` check against the
+actual model/data structure.
+
+### Analytic check
+
+```{r}
+#| label: prior-predictive-analytic
+
+set.seed(2026)
+n_sim <- 20000
+
+alpha     <- rnorm(n_sim, -3, 1)
+b_worker  <- rnorm(n_sim, 0, 0.5)
+b_age3065 <- rnorm(n_sim, 0, 0.5)
+b_age66p  <- rnorm(n_sim, 0, 0.5)
+b_male    <- rnorm(n_sim, 0, 0.5)
+b_immig   <- rnorm(n_sim, 0, 0.5)
+b_union   <- rnorm(n_sim, 0, 0.5)
+
+p_reference   <- plogis(alpha)
+p_worker      <- plogis(alpha + b_worker)
+p_max_combo   <- plogis(alpha + b_worker + b_age3065 + b_male + b_immig + b_union)
+icv_prior     <- p_worker - p_reference
+
+qs <- function(x) round(quantile(x, c(.025, .25, .5, .75, .975)), 4)
+
+tibble(
+  quantity = c(
+    "Pr(rightvote) at reference cell",
+    "Pr(rightvote | worker=1, else reference)",
+    "Pr(rightvote) at a maximal covariate combination",
+    "Prior-predictive worker contrast (ICV-like)"
+  )
+) %>%
+  bind_cols(
+    map_dfr(list(p_reference, p_worker, p_max_combo, icv_prior), ~ as_tibble_row(qs(.x)))
+  ) %>%
+  gt() %>%
+  fmt_number(columns = -quantity, decimals = 3)
+
+cat("P(reference-cell Pr(rightvote) > 0.5):", mean(p_reference > 0.5), "\n")
+cat("P(maximal-combination Pr(rightvote) > 0.5):", mean(p_max_combo > 0.5), "\n")
+cat("P(prior-predictive worker contrast > 0):", mean(icv_prior > 0), "\n")
+```
+
+The prior-predictive worker contrast is centered at essentially zero
+(`P(contrast > 0) ≈ 0.5`) with a 95% interval comfortably spanning the raw
+sample gap (~+3 points) in both directions — the prior is not pre-judging
+the sign or size of the worker effect. Implausible predictions (>50% radical
+right vote share) get well under 3% of prior mass even at the most
+AfD-favorable covariate combination.
+
+### Canonical brms check
+
+```{r}
+#| label: prior-predictive-brms
+#| eval: false
+
+fit_prior_only <- brm(
+  formula = model_formula,
+  data    = ess_model,
+  family  = bernoulli(),
+  prior   = model_priors,
+  sample_prior = "only",
+  chains = 4, cores = 4, iter = 2000, seed = 2026,
+  file = here("models", "m_ger_simple_prior_only")
+)
+
+pp_check(fit_prior_only, ndraws = 100) +
+  labs(title = "Prior predictive check: rightvote ~ worker + age_grp + gender + immigrant + union")
+```
+
+`eval: false` above only because this notebook was drafted in an environment
+without a working Stan toolchain to verify the MCMC step end-to-end (the
+data construction, priors, and analytic check above *were* run against the
+real, staged data). Set to `eval: true` (or delete the option) before
+running locally — inspect the plot for implausible mass before proceeding to
+the real fit.
+
+## Fitting the model
+
+```{r}
+#| label: fit-model
+#| eval: false
+
+fit <- brm(
+  formula = model_formula,
+  data    = ess_model,
+  family  = bernoulli(),
+  prior   = model_priors,
+  chains = 4, cores = 4, iter = 2000, seed = 2026,
+  file = here("models", "m_ger_simple")
+)
+```
+
+## Diagnostics
+
+```{r}
+#| label: diagnostics
+#| eval: false
+
+summary(fit)
+posterior::summarise_draws(fit, "rhat", "ess_bulk", "ess_tail")
+
+pp_check(fit, ndraws = 100)
+pp_check(fit, type = "stat_grouped", group = "worker", stat = "mean")
+```
+
+Check before interpreting anything below: all `Rhat < 1.01`, bulk- and
+tail-ESS comfortably above ~400 per parameter, and the grouped posterior
+predictive check shows the model reproducing the observed radical-right vote
+share within each worker group reasonably well. Do not proceed past this
+point on the basis of this notebook's code alone — inspect the actual
+numbers and plots yourself.
+
+# Focal result: Pr(rightvote | worker)
+
+```{r}
+#| label: focal-contrast
+#| eval: false
+
+worker_contrast <- avg_predictions(
+  fit,
+  variables = "worker",
+  type = "response"
+)
+worker_contrast
+
+worker_draws <- ess_model %>%
+  distinct(worker) %>%
+  add_epred_draws(fit, re_formula = NA) %>%
+  ungroup()
+
+worker_draws %>%
+  mutate(worker_lab = factor(worker, levels = c(0, 1), labels = c("Non-worker", "Worker"))) %>%
+  ggplot(aes(x = .epred, y = worker_lab, fill = worker_lab)) +
+  stat_halfeye(alpha = 0.7) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_viridis_d(guide = "none") +
+  labs(
+    x = "Posterior Pr(rightvote)", y = NULL,
+    title = "Posterior distribution of Pr(rightvote | worker), other covariates at reference levels"
+  ) +
+  my_theme()
+
+posterior_icv <- worker_draws %>%
+  select(.draw, worker, .epred) %>%
+  pivot_wider(names_from = worker, values_from = .epred, names_prefix = "p_worker") %>%
+  mutate(posterior_icv = p_worker1 - p_worker0)
+
+posterior_icv %>%
+  summarise(
+    median = median(posterior_icv),
+    q025 = quantile(posterior_icv, .025),
+    q975 = quantile(posterior_icv, .975),
+    p_gt_0 = mean(posterior_icv > 0)
+  )
+```
+
+`posterior_icv` is the covariate-adjusted, fully Bayesian analogue of the
+manuscript's closed-form `icv()`: instead of one point estimate from a raw
+2x2 table, it is a full posterior distribution of the worker/non-worker gap
+in `Pr(rightvote)`, net of age, gender, immigrant background, and union
+membership. Report it as median + 95% credible interval, and note
+`p_gt_0` — the posterior probability that the adjusted worker effect is
+positive — rather than reducing it to a single point estimate with a
+p-value.
+
+# Next steps
+
+- Run the two `eval: false` chunks locally (Stan toolchain required) and
+  replace this section with the actual diagnostic output and posterior
+  summaries.
+- Sensitivity check: refit with `beta_worker ~ Normal(0, 0.25)` and
+  `Normal(0, 1)` and confirm the posterior conclusion about `p_gt_0` is not
+  an artifact of the SD = 0.5 choice (ANALYSIS_PLAN.md, §7).
+- Robustness check: restrict to voters only (drop `nonvoter` from
+  `pvote_non_voter`) and compare.
+- Once satisfied with the specification, move `rightvote`/`worker`
+  construction into `R/functions_clean.R` and this model into
+  `R/functions_model.R`, and add both as `_targets.R` targets.
+- Extend to the multilevel model sequence in `ANALYSIS_PLAN.md` (M1/M2) once
+  ready to move beyond a single country.

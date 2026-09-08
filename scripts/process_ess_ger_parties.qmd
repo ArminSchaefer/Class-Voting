@@ -1,0 +1,124 @@
+---
+title: "Process ESS Germany"
+subtitle: "parties"
+author:
+  - name: Armin Schäfer
+    affiliation:
+      - id: jgu
+        name: Johannes Gutenberg University
+    orcid: 0000-0002-2538-0092
+    email: schaefer@politik.uni-mainz.de
+format: 
+  html:
+    number-sections: false
+    code-fold: true
+    code-summary: "Show the code"
+    self-contained: true
+embed-resources: true
+---
+
+# Preparation
+
+## Packages and appearance
+
+```{r}
+#| label: setup
+#| echo: true
+#| message: false
+#| warning: false
+
+if(!require("pacman")) {install.packages("pacman");library(pacman)}
+p_load(here, rio, tidyverse)
+
+```
+
+## Load total data set
+
+```{r}
+#| label: getdata
+#| message: false
+#| warning: false
+
+ess_ger_total <- import(here("data", "raw", "ess_ger_total.csv"))
+
+```
+
+## Code for the class scheme
+```{r}
+
+ess_ger_parties <- ess_ger_total %>% 
+  mutate(
+    pvote = case_when(
+      essround == 1 & prtvde2 == 5 ~ "radical left",
+      essround == 1 & prtvde2 == 3 ~ "greens",
+      essround == 1 & prtvde2 == 1 ~ "social democrats",
+      essround == 1 & prtvde2 == 4 ~ "liberals",
+      essround == 1 & prtvde2 == 2 ~ "christian democrats",
+      #essround == 1 & prtvde2 == 6 ~ "radical right",
+      essround == 2 & prtvade2 == 5 ~ "radical left",
+      essround == 2 & prtvade2 == 3 ~ "greens",
+      essround == 2 & prtvade2 == 1 ~ "social democrats",
+      essround == 2 & prtvade2 == 4 ~ "liberals",
+      essround == 2 & prtvade2 == 2 ~ "christian democrats",
+      #essround == 2 & (prtvade2 == 6 |  prtvbde2 == 7) ~ "radical right",
+      (essround == 3 | essround == 4) & prtvbde2 == 5 ~ "radical left",
+      (essround == 3 | essround == 4) & prtvbde2 == 3 ~ "greens",
+      (essround == 3 | essround == 4) & prtvbde2 == 1 ~ "social democrats",
+      (essround == 3 | essround == 4) & prtvbde2 == 4 ~ "liberals",
+      (essround == 3 | essround == 4) & prtvbde2 == 2 ~ "christian democrats",
+      #(essround == 3 | essround == 4) & (prtvbde2 == 6 | prtvbde2 == 7) ~ "radical right",
+      essround == 5 & prtvcde2 == 5 ~ "radical left",
+      essround == 5 & prtvcde2 == 3 ~ "greens",
+      essround == 5 & prtvcde2 == 1 ~ "social democrats",
+      essround == 5 & prtvcde2 == 4 ~ "liberals",
+      essround == 5 & prtvcde2 == 2 ~ "christian democrats",
+      #essround == 5 & (prtvcde2 == 6 |  prtvcde2 == 7) ~ "radical right",
+      
+      essround == 6 & prtvdde2 == 5 ~ "radical left",
+      essround == 6 & prtvdde2 == 3 ~ "greens",
+      essround == 6 & prtvdde2 == 1 ~ "social democrats",
+      essround == 6 & prtvdde2 == 4 ~ "liberals",
+      essround == 6 & prtvdde2 == 2 ~ "christian democrats",
+      #essround == 6 & (prtvdde2 == 6 |  prtvdde2 == 7) ~ "radical right",
+      
+      (essround == 7 | essround == 8 | essround == 9) & prtvede2 == 3 ~ "radical left",
+      (essround == 7 | essround == 8 | essround == 9) & prtvede2 == 6 ~ "radical right",
+      (essround == 7 | essround == 8 | essround == 9) & prtvede2 == 4 ~ "greens",
+      (essround == 7 | essround == 8 | essround == 9) & prtvede2 == 2 ~ "social democrats",
+      (essround == 7 | essround == 8 | essround == 9) & prtvede2 == 5 ~ "liberals",
+      (essround == 7 | essround == 8 | essround == 9) & prtvede2 == 1 ~ "christian democrats",
+      (essround == 7 | essround == 8 | essround == 9) & (prtvede2 == 6 | prtvede2 == 8) ~ "radical right",
+      
+      essround == 10 & prtvfde2 == 3 ~ "radical left",
+      essround == 10 & prtvfde2 == 4 ~ "greens",
+      essround == 10 & prtvfde2 == 2 ~ "social democrats",
+      essround == 10 & prtvfde2 == 5 ~ "liberals",
+      essround == 10 & prtvfde2 == 1 ~ "christian democrats",
+      essround == 10 & prtvfde2 == 6 ~ "radical right",
+      
+      essround == 11 & prtvgde2 == 3 ~ "radical left",
+      essround == 11 & prtvgde2 == 4 ~ "greens",
+      essround == 11 & prtvgde2 == 2 ~ "social democrats",
+      essround == 11 & prtvgde2 == 5 ~ "liberals",
+      essround == 11 & prtvgde2 == 1 ~ "christian democrats",
+      essround == 11 & prtvgde2 == 6 ~ "radical right"),
+    
+    voted = case_when(
+             vote == 1 ~ "voted",
+             vote == 2 ~ "abstained"),
+    pvote_non_voter = case_when(
+      pvote == "christian democrats" & voted == "voted" ~ "christian democrats",
+      pvote == "greens" & voted == "voted" ~ "greens",
+      pvote == "liberals" & voted == "voted" ~ "liberals",
+      pvote == "radical left" & voted == "voted" ~ "radical left",
+      pvote == "radical right" & voted == "voted" ~ "radical right",
+      pvote == "social democrats" & voted == "voted" ~ "social democrats",
+      is.na(pvote) & voted == "abstained" ~ "nonvoter"))
+
+ess_ger_parties <- ess_ger_parties %>% 
+  dplyr::select(idno, essround, pvote, pvote_non_voter, voted)
+
+saveRDS(ess_ger_parties, here("data", "processed", "ess_ger_parties.rds"))
+
+```
+

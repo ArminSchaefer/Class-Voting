@@ -1,5 +1,6 @@
 ---
-title: "Voting for a party and contributing to a party's vote. A unified account with Bayes' rule"
+title: "Loyalty and Contribution: A Unified Account of Class Voting 
+With Bayes’ Rule"
 author:
   - name: Armin Schäfer
     affiliation:
