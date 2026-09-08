@@ -399,8 +399,24 @@ worker_contrast <- avg_predictions(
 )
 worker_contrast
 
-worker_draws <- ess_model %>%
-  distinct(worker) %>%
+# `add_epred_draws()` builds its prediction from every population-level
+# predictor in the model, so `newdata` must supply all of them -- unlike
+# `re_formula = NA` (which only drops *group-level* terms, none of which
+# exist in this flat model), there is no way to omit age_grp/gender/
+# immigrant/union here. We hold them at their reference levels explicitly,
+# including the *unused* factor levels (via `levels = levels(ess_model$...)`)
+# so brms reconstructs the same dummy-coded columns it was fitted on --
+# a factor built from a single string without this would silently produce
+# a 1-level factor and break the model matrix.
+newdata_worker <- tibble(
+  worker    = c(0, 1),
+  age_grp   = factor("18-29", levels = levels(ess_model$age_grp)),
+  gender    = factor("female", levels = levels(ess_model$gender)),
+  immigrant = 0,
+  union     = 0
+)
+
+worker_draws <- newdata_worker %>%
   add_epred_draws(fit, re_formula = NA) %>%
   ungroup()
 
@@ -429,6 +445,15 @@ posterior_icv %>%
     p_gt_0 = mean(posterior_icv > 0)
   )
 ```
+
+`worker_contrast` and `posterior_icv` answer a related but distinct
+question and should not be reported interchangeably: `worker_contrast`
+(via `avg_predictions()`) is the *average marginal effect* of `worker`,
+averaged over the observed sample distribution of age/gender/immigrant/
+union; `posterior_icv` is the effect for one specific, fixed covariate
+profile (young, female, non-immigrant, non-union). They will normally be
+close but need not be identical, particularly if `worker` is unevenly
+distributed across the other covariates (e.g. if workers skew male).
 
 `posterior_icv` is the covariate-adjusted, fully Bayesian analogue of the
 manuscript's closed-form `icv()`: instead of one point estimate from a raw
