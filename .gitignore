@@ -15,10 +15,15 @@ renv/sandbox/
 _targets/
 _targets_r/
 
-# Raw survey microdata: ESS terms of use prohibit redistribution.
-# Document provenance/access in DATA_PROVENANCE.md instead of committing files.
+# Survey microdata: ESS terms of use prohibit redistribution. This covers
+# raw AND processed/cleaned files alike -- individual-level data stays
+# individual-level data however much it has been recoded. Document
+# provenance/access in DATA_PROVENANCE.md instead of committing files.
 data/raw/*
 !data/raw/.gitkeep
+data/*.rds
+data/processed/*
+!data/processed/.gitkeep
 
 # Fitted brms model objects are large binaries; track code + seed, not the object.
 # Remove this ignore (or move to git-lfs) if you want fits versioned directly.
