@@ -1,0 +1,36 @@
+# R session / RStudio
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+.httr-oauth
+
+# renv
+renv/library/
+renv/staging/
+renv/python/
+renv/sandbox/
+
+# targets pipeline store — regenerate with targets::tar_make(), don't commit
+_targets/
+_targets_r/
+
+# Raw survey microdata: ESS terms of use prohibit redistribution.
+# Document provenance/access in DATA_PROVENANCE.md instead of committing files.
+data/raw/*
+!data/raw/.gitkeep
+
+# Fitted brms model objects are large binaries; track code + seed, not the object.
+# Remove this ignore (or move to git-lfs) if you want fits versioned directly.
+models/*.rds
+!models/.gitkeep
+
+# Quarto render artifacts
+manuscript/manuscript.html
+manuscript/manuscript_files/
+manuscript/.quarto/
+/.quarto/
+
+# OS cruft
+.DS_Store
+Thumbs.db
