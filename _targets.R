@@ -23,7 +23,22 @@ tar_option_set(
 )
 
 list(
-  # --- Data import & cleaning -------------------------------------------
+  # --- Germany, simple (non-hierarchical) model ---------------------------
+  # Promoted from scripts/analyze_ess_ger.qmd. NOTE: essger.rds is not raw
+  # ESS microdata -- it is already merged with the class scheme and
+  # party-vote coding by scripts/process_ess_ger*.qmd, which are not yet
+  # targets themselves (a natural next step, once that upstream processing
+  # is stable enough to freeze into functions too).
+  tar_target(
+    essger_file,
+    here::here("data", "processed", "essger.rds"),
+    format = "file"
+  ),
+  tar_target(essger_raw, readRDS(essger_file)),
+  tar_target(ess_ger_model_data, clean_ess_ger_simple(essger_raw)),
+  tar_target(model_ger_simple, fit_model_ger_simple(ess_ger_model_data)),
+
+  # --- Data import & cleaning (cross-national, future) --------------------
   tar_target(raw_data_file, here::here("data", "raw", "ess_rounds.rds"), format = "file"),
   tar_target(ess_raw, import_ess(raw_data_file)),
   tar_target(ess_clean, clean_ess(ess_raw)),

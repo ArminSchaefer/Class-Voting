@@ -19,6 +19,21 @@ execute:
   message: false
 ---
 
+::: {.callout-note}
+**Status: superseded by the pipeline.** After checking the fitted model
+against this notebook's specification, the sample was narrowed further to
+the 2017 and 2021 elections only, and to voters only (dropping non-voters
+rather than folding them into "not radical right"). That finalized
+specification now lives in `R/functions_clean.R`
+(`clean_ess_ger_simple()`) and `R/functions_model.R`
+(`fit_model_ger_simple()`), run via `_targets.R` (`targets::tar_make()`,
+then `targets::tar_read(model_ger_simple)`). This notebook is kept as the
+record of *how* the priors were derived and checked (still valid) and of
+the exploratory `btw >= 2013`, population-based sample this model started
+from (superseded, not wrong) — it is not the canonical version of the
+model going forward.
+:::
+
 ```{r}
 #| label: setup
 #| echo: false
@@ -466,16 +481,26 @@ p-value.
 
 # Next steps
 
-- Run the two `eval: false` chunks locally (Stan toolchain required) and
-  replace this section with the actual diagnostic output and posterior
-  summaries.
+- [x] ~~Restrict to voters only.~~ Done: `clean_ess_ger_simple()` drops
+  non-voters (`pvote == NA`) instead of folding them into "not radical
+  right".
+- [x] ~~Once satisfied with the specification, move `rightvote`/`worker`
+  construction into `R/functions_clean.R` and this model into
+  `R/functions_model.R`, and add both as `_targets.R` targets.~~ Done —
+  see the status note at the top of this notebook. The sample was also
+  narrowed from `btw >= 2013` to `btw %in% c(2017, 2021)` in the process.
+- Run `targets::tar_make()` (Stan toolchain required for `model_ger_simple`)
+  and inspect `targets::tar_read(model_ger_simple)`'s diagnostics
+  (`summary()`, `pp_check()`, Rhat/ESS) before trusting any posterior
+  result from it.
 - Sensitivity check: refit with `beta_worker ~ Normal(0, 0.25)` and
   `Normal(0, 1)` and confirm the posterior conclusion about `p_gt_0` is not
-  an artifact of the SD = 0.5 choice (ANALYSIS_PLAN.md, §7).
-- Robustness check: restrict to voters only (drop `nonvoter` from
-  `pvote_non_voter`) and compare.
-- Once satisfied with the specification, move `rightvote`/`worker`
-  construction into `R/functions_clean.R` and this model into
-  `R/functions_model.R`, and add both as `_targets.R` targets.
+  an artifact of the SD = 0.5 choice (ANALYSIS_PLAN.md, §7) — a good use of
+  `tar_target()`'s branching, or just a manual second call to
+  `fit_model_ger_simple()` with an adjusted prior argument.
 - Extend to the multilevel model sequence in `ANALYSIS_PLAN.md` (M1/M2) once
   ready to move beyond a single country.
+- Consider formalizing `scripts/process_ess_ger*.qmd` (which build
+  `essger.rds` from raw ESS + the class scheme) into `R/` functions and
+  targets too, so the whole pipeline — not just this model — is
+  `tar_make()`-reproducible from raw ESS data.

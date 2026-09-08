@@ -74,3 +74,49 @@ compare_models <- function(...) {
   # loo::loo_compare(loos)
   stop("compare_models(): not yet implemented.")
 }
+
+# ---------------------------------------------------------------------------
+# Germany, simple (non-hierarchical) model -- promoted from
+# scripts/analyze_ess_ger.qmd. Distinct from the M0/M1/M2 cross-national
+# sequence above: this is a deliberately simple, single-country baseline,
+# not literally "M0" (M0 above is meant to be the pooled cross-national
+# model once that data exists).
+# ---------------------------------------------------------------------------
+
+#' Fit the simple Bayesian logistic model of radical-right voting in
+#' Germany (2017+2021, voters only): rightvote ~ worker + age_grp + gender +
+#' immigrant + union, no group-level structure.
+#'
+#' See scripts/analyze_ess_ger.qmd for the derivation of the priors (prior
+#' predictive checks against real AfD vote shares) and of the `0 +
+#' Intercept` parameterization used here so the Intercept is the literal
+#' reference-respondent log-odds rather than brms's internally-centered one.
+#'
+#' Deliberately does NOT pass `file =` to brm(): targets already caches this
+#' target by content hash (of ess_ger_model_data and of this function's own
+#' code), so layering brms's own file-based cache on top would be a second,
+#' independent cache that can go stale without targets knowing -- e.g. if
+#' you edit the priors below, targets will correctly detect the code change
+#' and re-fit, but a stale `file=...rds` would happily hand brms back the
+#' old fit instead. Let targets be the only cache.
+#'
+#' @param ess_ger_model_data Output of clean_ess_ger_simple().
+#' @return A fitted brmsfit.
+fit_model_ger_simple <- function(ess_ger_model_data) {
+  model_formula <- brms::bf(
+    rightvote ~ 0 + Intercept + worker + age_grp + gender + immigrant + union
+  )
+
+  model_priors <- c(
+    brms::prior(normal(-3, 1), class = "b", coef = "Intercept"),
+    brms::prior(normal(0, 0.5), class = "b")
+  )
+
+  brms::brm(
+    formula = model_formula,
+    data    = ess_ger_model_data,
+    family  = bernoulli(),
+    prior   = model_priors,
+    chains = 4, cores = 4, iter = 2000, seed = 2026
+  )
+}
