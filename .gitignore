@@ -30,11 +30,11 @@ data/processed/*
 models/*.rds
 !models/.gitkeep
 
-# Quarto render artifacts
-manuscript/manuscript.html
-manuscript/manuscript_files/
-manuscript/.quarto/
-/.quarto/
+# Quarto render artifacts (any .qmd, not just the manuscript -- these are
+# regeneratable from source and go stale silently if left committed)
+*.html
+*_files/
+.quarto/
 
 # OS cruft
 .DS_Store
