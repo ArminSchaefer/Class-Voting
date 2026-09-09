@@ -97,6 +97,7 @@ notebook.
 
 ess <- readRDS(here("data", "processed", "essger.rds"))
 nrow(ess)
+
 ```
 
 ## Outcome: `rightvote`
