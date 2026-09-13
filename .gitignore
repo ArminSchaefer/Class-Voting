@@ -39,3 +39,4 @@ models/*.rds
 # OS cruft
 .DS_Store
 Thumbs.db
+.Rproj.user
