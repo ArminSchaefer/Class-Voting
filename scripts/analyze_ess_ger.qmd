@@ -114,7 +114,7 @@ natural robustness check but is not the primary specification here.
 ```{r}
 #| label: construct-rightvote
 
-ess <- ess %>%
+ess <- ess |> 
   mutate(
     rightvote = case_when(
       is.na(pvote_non_voter) ~ NA_real_,
@@ -137,7 +137,7 @@ manual working class, `worker` combines the two manual-worker categories:
 ```{r}
 #| label: construct-worker
 
-ess <- ess %>%
+ess <- ess |> 
   mutate(
     worker = case_when(
       is.na(class5) ~ NA_real_,
@@ -163,7 +163,7 @@ a pooled average:
 #| label: check-pre-afd
 
 ess %>%
-  group_by(btw) %>%
+  group_by(btw) |> 
   summarise(n = n(), pct_rightvote = round(100 * mean(rightvote, na.rm = TRUE), 2))
 ```
 
