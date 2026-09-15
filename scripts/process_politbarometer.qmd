@@ -1,0 +1,95 @@
+---
+title: "Process Politbarometer"
+author:
+  - name: Armin Schäfer
+    affiliation:
+      - id: jgu
+        name: Johannes Gutenberg University
+    orcid: 0000-0002-2538-0092
+    email: schaefer@politik.uni-mainz.de
+format: 
+  html:
+    number-sections: false
+    code-fold: true
+    code-summary: "Show the code"
+    self-contained: true
+embed-resources: true
+---
+
+# Preparation
+
+## Packages and appearance
+
+```{r}
+#| label: setup
+#| echo: true
+#| message: false
+#| warning: false
+
+if (!require("pacman")) {
+  install.packages("pacman")
+  library(pacman)
+}
+p_load(here, rio, tinytable, tidyverse)
+
+options(rio.import.trust = TRUE)
+
+```
+
+## Load total data set
+
+```{r}
+#| label: getdata
+#| message: false
+
+pb_total <- import(here("data", "raw", "ZA2391_v17-0-0.dta"))
+
+```
+
+## Recode variables
+```{r}
+#| label: recoding
+
+pb <- pb_total |> 
+  mutate(
+    class_ego = case_when(
+      v65 %in% c(17, 19)  ~ "unskilled worker",
+      v65 %in% c(18, 20)  ~ "skilled worker",
+      v65 == 5            ~ "lower-grade employee",
+      v65 %in% c(6:8)     ~ "higher-grade employee",
+      v65 %in% c(9:13)    ~ "civil servant",
+      v65 %in% c(1:4)     ~ "self-employed"
+    ),
+    class_hhv = case_when(
+      v70 %in% c(17, 19)  ~ "unskilled worker",
+      v70 %in% c(18, 20)  ~ "skilled worker",
+      v70 == 5            ~ "lower-grade employee",
+      v70 %in% c(6:8)     ~ "higher-grade employee",
+      v70 %in% c(9:13)    ~ "civil servant",
+      v70 %in% c(1:4)     ~ "self-employed"),
+    class = ifelse(is.na(class_ego), class_hhv, class_ego),
+    worker = case_when(
+    class %in% c("unskilled worker", "skilled worker") ~ 1,
+    class %in% c("lower-grade employee", "higher-grade employee",
+                 "civil servant", "self-employed") ~ 0),
+    pvote = ifelse(v6 < 0, NA, v6),
+    pvote = case_when(
+      v6 == 1   ~ "CDU/CSU",
+      v6 == 4   ~ "SPD",
+      v6 == 5   ~ "FDP",
+      v6 == 6   ~ "Grüne",
+      v6 == 7   ~ "Linke",
+      v6 == 322 ~ "AfD",
+      v6 == 392 ~ "BSW"),
+    afd = ifelse(pvote == "AfD", 1, 0),
+    spd = ifelse(pvote == "SPD", 1, 0),
+    year = intyear,
+    weight = if_else(year < 2000, pwght, dwght))
+
+saveRDS(pb, here("data", "processed", "pb7724.rds"))
+
+```
+
+```{r}
+
+```

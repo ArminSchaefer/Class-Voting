@@ -1,0 +1,329 @@
+---
+title: "Process Politbarometer"
+author:
+  - name: Armin Schäfer
+    affiliation:
+      - id: jgu
+        name: Johannes Gutenberg University
+    orcid: 0000-0002-2538-0092
+    email: schaefer@politik.uni-mainz.de
+format: 
+  html:
+    number-sections: false
+    code-fold: true
+    code-summary: "Show the code"
+    self-contained: true
+embed-resources: true
+---
+
+# Preparation
+
+## Packages and appearance
+
+```{r}
+#| label: setup
+#| echo: true
+#| message: false
+#| warning: false
+
+if (!require("pacman")) {
+  install.packages("pacman")
+  library(pacman)
+}
+p_load(here, rio, brms, cmdstanr, tidybayes, ggdist, posterior, bayesplot, loo, marginaleffects, tinytable, tidyverse)
+
+options(rio.import.trust = TRUE)
+
+```
+
+## Load total data set
+
+```{r}
+#| label: getdata
+#| message: false
+
+pb <- import(here("data", "processed", "pb7724.rds"))
+
+```
+
+Do votes add up to 100% ?
+
+```{r}
+
+check_votes <- pb |> 
+filter(!is.na(pvote)) |>  # exclude missing vote intentions
+count(year, pvote)  |> 
+group_by(year) |> 
+mutate(
+vote_share = 100 * n / sum(n)
+) |> 
+summarise(
+total_share = sum(vote_share)
+)
+
+check_votes
+
+```
+
+## Class and SPD votes
+
+```{r}
+
+pb |>
+  filter(!is.na(worker), !is.na(spd)) |> 
+  group_by(year, spd) |> 
+  summarise(mean_class = weighted.mean(worker, weight, na.rm = TRUE)) |> 
+  ggplot(aes(x = year, y = mean_class, color = as.factor(spd)))+
+  geom_smooth()+
+  theme_light()
+
+```
+
+## Aggregate Bayesian model
+
+```{r}
+
+priors_loyalty <- c(
+  prior(normal(0, 1.5), class = "Intercept"),
+  prior(normal(0, 1),   class = "b", coef = "worker"),
+  prior(exponential(2), class = "sd"),
+  prior(lkj(2),         class = "cor")
+)
+
+pb_agg <- pb |>
+  filter(year> 2012 & year < 2025) |> 
+  count(year, worker, afd) |>
+  tidyr::pivot_wider(names_from = afd, values_from = n, values_fill = 0,
+                      names_prefix = "afd_") |>
+  mutate(n_total = afd_0 + afd_1) |> 
+  filter(!is.na(worker))
+
+m2a_prior_check <- brm(
+  afd_1 | trials(n_total) ~ worker + (1 + worker | year),
+  data         = pb_agg,
+  family       = binomial(),
+  prior        = priors_loyalty,
+  backend      = "cmdstanr",
+  threads      = threading(4),
+  sample_prior = "only",   # draws from prior, ignores the likelihood entirely
+  chains = 4, cores = 4, seed = 1
+)
+
+prior_pred <- pb_agg |>
+  distinct(year, worker) |>
+  mutate(n_total = 1) |>
+  add_linpred_draws(m2a_prior_check, transform = TRUE, ndraws = 200) |>
+  rename(p_afd = .linpred)
+
+library(ggplot2)
+ggplot(prior_pred, aes(x = year, y = p_afd, group = .draw)) +
+  geom_line(alpha = 0.05) +
+  facet_wrap(~ worker) +
+  coord_cartesian(ylim = c(0, 1)) +
+  labs(y = "Prior-implied Pr(AfD | worker, year)")
+
+prior_draws(m2a_prior_check) |>
+  select(starts_with("sd_")) |>
+  summary()
+```
+
+## descriptive plots
+```{r}
+
+pb |> 
+  filter(year > 2012) |> 
+  filter(!is.na(class)) |> 
+  group_by(year) |> 
+  summarise(mean_afd = weighted.mean(afd, weight, na.rm = TRUE)) |> 
+  ggplot(aes(x = year, y = mean_afd))+
+  geom_smooth()+
+  theme_light()
+
+pb |> 
+  filter(year > 2012) |> 
+  filter(!is.na(class)) |> 
+  group_by(year, class) |> 
+  summarise(mean_afd = weighted.mean(afd, weight, na.rm = TRUE)) |> 
+  ggplot(aes(x = year, y = mean_afd, color = class))+
+  geom_smooth()+
+  theme_light()
+
+pb |>
+  filter(year > 2012) |> 
+  filter(!is.na(worker), !is.na(afd)) |> 
+  group_by(year, afd) |> 
+  summarise(mean_class = weighted.mean(worker, weight, na.rm = TRUE)) |> 
+  ggplot(aes(x = year, y = mean_class, color = as.factor(afd)))+
+  geom_smooth()+
+  theme_light()
+
+```
+
+## Loyalty -- Pr(afd|worker)
+
+```{r}
+
+pb_afd <- pb |> 
+  filter(year > 2012 & year < 2025)
+
+priors_loyalty <- c(
+  prior(normal(0, 1.5), class = "Intercept"),
+  prior(normal(0, 1),   class = "b", coef = "worker"),
+  prior(exponential(1), class = "sd"),
+  prior(lkj(2),         class = "cor")
+)
+
+m0 <- brm(afd | weights(weight) ~ worker,
+          data = pb_afd,
+          family = bernoulli(),
+          prior = priors_loyalty[1:2, ],
+          chains = 4, cores = 4, seed = 1,
+          backend      = "cmdstanr",
+          threads      = threading(4),
+          file = here("models", "pb_afd_m0"))
+
+m1 <- brm(afd | weights(weight) ~ worker + (1 | year),
+          data = pb_afd, family = bernoulli(),
+          prior = priors_loyalty[c(1,2,3), ],
+          chains = 4, cores = 4, seed = 1,
+          backend      = "cmdstanr",
+          threads      = threading(4),
+          file = here("models", "pb_afd_m1"))
+
+m2a <- brm(afd | weights(weight) ~ worker + (1 + worker | year),
+           data = pb_afd, family = bernoulli(),
+           prior = priors_loyalty,
+           chains = 4, cores = 4, seed = 1,
+           backend = "cmdstanr",
+           threads = threading(4),
+           file = here("models", "pb_afd_m2a"))
+
+# Rhat < 1.01, bulk/tail ESS for ALL params incl. group-level SDs
+summary(m2a) 
+# binary DV, check calibration by year
+pp_check(m2a) 
+# loo_compare(loo(m0), loo(m1), loo(m2a))
+
+```
+
+```{r}
+
+icv_by_year <- pb_afd |>
+  distinct(year) |>
+  tidyr::crossing(worker = c(0, 1)) |>
+  add_epred_draws(m2a) |>
+  ungroup() |>
+  select(-.row) |>
+  pivot_wider(
+    id_cols = c(year, .chain, .iteration, .draw),
+    names_from = worker, values_from = .epred, names_prefix = "p_worker"
+  ) |> 
+  mutate(icv = p_worker1 - p_worker0)
+
+icv_by_year |>
+  ggplot(aes(x = factor(year), y = icv)) +
+  stat_gradientinterval()+
+  geom_hline(yintercept = 0, linetype = "dashed",
+             color = "#c3c2b7", linewidth = 0.4) +   # baseline/axis gray, not a data hue
+  scale_y_continuous(labels = scales::label_percent(accuracy = 1)) +
+  labs(
+    x = NULL,
+    y = "P(AfD | worker) \u2212 P(AfD | non-worker)",
+    title = "Class voting gap in AfD support, by survey year",
+    caption = "Posterior median, 66% and 95% credible intervals"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.line.x = element_line(color = "#c3c2b7")
+  )
+
+```
+
+## Contribution Pr(Worker | AfD)
+
+```{r}
+
+priors_contribution <- c(
+  prior(normal(0, 1.5), class = "Intercept"),
+  prior(normal(0, 1),   class = "b", coef = "afd"),
+  prior(exponential(1), class = "sd"),
+  prior(lkj(2),         class = "cor")
+)
+
+m2a_contrib <- brm(
+  worker | weights(weight) ~ afd + (1 + afd | year),
+  data = pb_afd, family = bernoulli(link = "logit"),
+  prior = priors_contribution,
+  backend = "cmdstanr",
+  threads = threading(4),
+  chains = 4, cores = 4, seed = 1,
+  file = here("models", "pb_afd_m2a_contrib"))
+
+contribution_by_year <- pb_afd |>
+  distinct(year) |>
+  tidyr::crossing(afd = c(0, 1)) |>
+  add_epred_draws(m2a_contrib) |>
+  ungroup() |>
+  select(-.row) |>
+  pivot_wider(names_from = afd, values_from = .epred, names_prefix = "p_afd")
+
+contribution_by_year |> 
+  ggplot(aes(x = factor(year), y = p_afd1)) +
+  stat_gradientinterval()+
+  scale_y_continuous(limits = c(0, 0.5))+
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.line.x = element_line(color = "#c3c2b7")
+  )
+```
+
+## Estimated share of workers to then calculate PCI
+
+```{r}
+
+priors_worker_share <- c(
+  prior(normal(0, 1.5), class = "Intercept"),
+  prior(exponential(1), class = "sd")
+)
+
+m_worker_share <- brm(
+  worker | weights(weight) ~ 1 + (1 | year),
+  data   = pb_afd,
+  family = bernoulli(),
+  prior  = priors_worker_share,
+  backend = "cmdstanr",
+  threads = threading(4),
+  chains = 4, cores = 4, seed = 1,
+  file = here("models", "pb_workers_share")
+)
+
+worker_share_draws <- pb_afd |>
+  distinct(year) |>
+  add_epred_draws(m_worker_share) |>
+  ungroup() |>
+  rename(worker_share = .epred) |>
+  select(year, .draw, worker_share)
+
+pci_by_year <- pb_afd |>
+  distinct(year) |>
+  tidyr::crossing(afd = c(0, 1)) |>
+  add_epred_draws(m2a_contrib) |>
+  ungroup() |>
+  select(-.row) |>
+  pivot_wider(names_from = afd, values_from = .epred, names_prefix = "p_afd") |>
+  left_join(worker_share_draws, by = c("year", ".draw")) |>
+  mutate(pci = p_afd1 - worker_share)
+
+pci_by_year |> 
+  ggplot(aes(x = factor(year), y = pci)) +
+  stat_gradientinterval()+
+  geom_hline(yintercept = 0, linetype = "dotted")+
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.line.x = element_line(color = "#c3c2b7")
+  )
+
+```
