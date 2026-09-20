@@ -49,7 +49,6 @@ Reads in the cleaned, pooled Politbarometer data set (survey waves from 1977 to 
 pb <- import(here("data", "processed", "pb7724.rds"))
 pb_afd <- pb |>
   filter(year > 2012 & year < 2025)
-
 ```
 
 Do votes add up to 100% ?
@@ -87,7 +86,7 @@ pb |>
   filter(year > 2012) |>
   filter(!is.na(class)) |>
   group_by(year) |>
-  summarise(mean_afd = weighted.mean(afd, weight_norm, na.rm = TRUE)) |>
+  summarise(mean_afd = weighted.mean(afd, weight, na.rm = TRUE)) |>
   ggplot(aes(x = year, y = mean_afd))+
   geom_smooth()+
   theme_light()
@@ -96,7 +95,7 @@ pb |>
   filter(year > 2012) |>
   filter(!is.na(class)) |>
   group_by(year, class) |>
-  summarise(mean_afd = weighted.mean(afd, weight_norm, na.rm = TRUE)) |>
+  summarise(mean_afd = weighted.mean(afd, weight, na.rm = TRUE)) |>
   ggplot(aes(x = year, y = mean_afd, color = class))+
   geom_smooth()+
   theme_light()
@@ -105,7 +104,7 @@ pb |>
   filter(year > 2012) |>
   filter(!is.na(worker), !is.na(afd)) |>
   group_by(year, afd) |>
-  summarise(mean_class = weighted.mean(worker, weight_norm, na.rm = TRUE)) |>
+  summarise(mean_class = weighted.mean(worker, weight, na.rm = TRUE)) |>
   ggplot(aes(x = year, y = mean_class, color = as.factor(afd)))+
   geom_smooth()+
   theme_light()
@@ -117,6 +116,9 @@ pb |>
 A prior predictive check, run before the model ever sees the actual outcome data (`sample_prior = "only"`). The data are first aggregated to yearly counts of AfD voters vs. non-voters by class. A multilevel logistic model is then specified — allowing both the intercept and the effect of being a worker to vary by year — and draws are taken purely from the priors. The resulting plot shows the range of AfD-support probabilities the priors imply across years and class groups, and the summary of the group-level standard deviations helps judge whether the priors are sensibly (not absurdly) wide. This step is about validating the priors, not yet drawing substantive conclusions.
 
 ```{r}
+
+pb_afd <- pb |>
+  filter(year > 2012 & year < 2025)
 
 # The intercept has a prior centred on a log-odds of -2,
 # corresponding to a baseline AfD probability of about 12%.
@@ -292,37 +294,27 @@ The core "loyalty" models: how likely are workers, versus non-workers, to vote A
 
 ```{r}
 
-priors_loyalty <- c(
-  prior(normal(-2, 0.5), class = "Intercept"),
-  prior(normal(0, 0.5), class = "b", coef = "worker"),
-  prior(exponential(3), class = "sd"),
-  prior(lkj(2), class = "cor")
-)
-
-m0 <- brm(afd | weights(weight_norm) ~ worker,
+m0 <- brm(afd | weights(weight) ~ worker,
           data = pb_afd,
           family = bernoulli(),
           prior = priors_loyalty[1:2, ],
           chains = 4, cores = 4, seed = 1,
-          iter = 1000, warmup = 500,
-          backend      = "cmdstanr",
-          threads      = threading(4),
-          file = here("models", "pb_afd_loyal0"))
-
-m1 <- brm(afd | weights(weight_norm) ~ worker + (1 | year),
-          data = pb_afd, family = bernoulli(),
-          prior = priors_loyalty[c(1,2,3), ],
-          chains = 4, cores = 4, seed = 1,
-          iter = 1000, warmup = 500,
           backend      = "cmdstanr",
           threads      = threading(4),
           file = here("models", "pb_afd_loyal1"))
 
-m2a <- brm(afd | weights(weight_norm) ~ worker + (1 + worker | year),
+m1 <- brm(afd | weights(weight) ~ worker + (1 | year),
+          data = pb_afd, family = bernoulli(),
+          prior = priors_loyalty[c(1,2,3), ],
+          chains = 4, cores = 4, seed = 1,
+          backend      = "cmdstanr",
+          threads      = threading(4),
+          file = here("models", "pb_afd_loyal2"))
+
+m2a <- brm(afd | weights(weight) ~ worker + (1 + worker | year),
            data = pb_afd, family = bernoulli(),
            prior = priors_loyalty,
            chains = 4, cores = 4, seed = 1,
-          iter = 1000, warmup = 500,
            backend = "cmdstanr",
            threads = threading(4),
            file = here("models", "pb_afd_loyal2"))
@@ -331,7 +323,7 @@ m2a <- brm(afd | weights(weight_norm) ~ worker + (1 + worker | year),
 summary(m2a)
 # binary DV, check calibration by year
 pp_check(m2a)
-loo_compare(loo(m0), loo(m1), loo(m2a))
+# loo_compare(loo(m0), loo(m1), loo(m2a))
 
 ```
 
@@ -360,6 +352,7 @@ icv_by_year |>
   labs(
     x = NULL,
     y = "P(AfD | worker) − P(AfD | non-worker)",
+    title = "Class voting gap in AfD support, by survey year",
     caption = "Posterior median, 66% and 95% credible intervals"
   ) +
   theme_minimal(base_size = 12) +
@@ -367,31 +360,6 @@ icv_by_year |>
     panel.grid.minor = element_blank(),
     axis.line.x = element_line(color = "#c3c2b7")
   )
-
-ggsave(here("figs", "class_gap_afd.png"),
-       width = 10, height = 7, dpi = 300,
-       bg = "white")
-
-icv_by_year |>
-  ggplot(aes(x = factor(year), y = p_worker1)) +
-  stat_gradientinterval()+
-  scale_y_continuous(limits = c(0, 0.7)) +
-  labs(
-    x = NULL,
-    y = "P(AfD | worker)",
-    caption = "Posterior median, 66% and 95% credible intervals"
-  ) +
-  theme_minimal(base_size = 12) +
-  theme(
-    panel.grid.minor = element_blank(),
-    axis.line.x = element_line(color = "#c3c2b7"),
-    axis.text.x = element_text(angle = 90)
-  )
-
-ggsave(here("figs", "loyalty_worker_afd.png"),
-      width = 10, height = 7, dpi = 300,
-      bg = "white")
-
 
 ```
 
@@ -515,21 +483,14 @@ ggplot(
 
 ```{r}
 
-priors_contribution <- c(
-  prior(normal(-1.0, 0.5), class = "Intercept"),
-  prior(normal(0, 1), class = "b", coef = "afd"),
-  prior(exponential(3), class = "sd"),
-  prior(lkj(2), class = "cor")
-)
-
 m2a_contrib <- brm(
-  worker | weights(weight_norm) ~ afd + (1 + afd | year),
+  worker | weights(weight) ~ afd + (1 + afd | year),
   data = pb_afd, family = bernoulli(link = "logit"),
   prior = priors_contribution,
   backend = "cmdstanr",
   threads = threading(4),
   chains = 4, cores = 4, seed = 1,
-  file = here("models", "pb_workers_afd_contrib"))
+  file = here("models", "pb_afd_m2a_contrib"))
 
 contribution_by_year <- pb_afd |>
   distinct(year) |>
@@ -542,23 +503,18 @@ contribution_by_year <- pb_afd |>
 contribution_by_year |>
   ggplot(aes(x = factor(year), y = p_afd1)) +
   stat_gradientinterval()+
-  scale_y_continuous(limits = c(0, 1))+
-  labs(x = NULL,
-  y = "Pr(worker | AfD)")+
+  scale_y_continuous(limits = c(0, 0.5))+
   theme_minimal(base_size = 12) +
   theme(
     panel.grid.minor = element_blank(),
     axis.line.x = element_line(color = "#c3c2b7")
-  ) + 
+  ) +
   theme_minimal(base_size = 12) +
   theme(
     panel.grid.minor = element_blank(),
     axis.line.x = element_line(color = "#c3c2b7")
   )
 
-ggsave(here("figs", "contrib_workers_afd.png"),
-       width = 10, height = 7, dpi = 300,
-       bg = "white")
 ```
 
 ## Estimated share of workers to then calculate PCI
@@ -573,14 +529,14 @@ priors_worker_share <- c(
 )
 
 m_worker_share <- brm(
-  worker | weights(weight_norm) ~ 1 + (1 | year),
+  worker | weights(weight) ~ 1 + (1 | year),
   data   = pb_afd,
   family = bernoulli(),
   prior  = priors_worker_share,
   backend = "cmdstanr",
   threads = threading(4),
   chains = 4, cores = 4, seed = 1,
-  file = here("models", "pb_workers_share_1324")
+  file = here("models", "pb_workers_share")
 )
 
 worker_share_draws <- pb_afd |>
@@ -604,25 +560,22 @@ pci_by_year |>
   ggplot(aes(x = factor(year), y = pci)) +
   stat_gradientinterval()+
   geom_hline(yintercept = 0, linetype = "dotted")+
-  labs(x = NULL, y = "Party Cleavage Index") +
   theme_minimal(base_size = 12) +
   theme(
     panel.grid.minor = element_blank(),
     axis.line.x = element_line(color = "#c3c2b7")
-  ) + 
+  ) +
   theme_minimal(base_size = 12) +
   theme(
     panel.grid.minor = element_blank(),
     axis.line.x = element_line(color = "#c3c2b7")
   )
 
-ggsave(here("figs", "pci_workers_afd.png"),
-       width = 10, height = 7, dpi = 300,
-       bg = "white")
-
 ```
 
-# Class and SPD votes
+# Class vote SPD (1977-2024)
+
+## Class and SPD votes
 
 A first descriptive look at class and party choice: plots the average share of working-class respondents over time, separately for SPD voters and non-SPD voters, to see whether the SPD's traditional class base has shifted.
 
@@ -632,7 +585,7 @@ A first descriptive look at class and party choice: plots the average share of w
 pb |>
   filter(!is.na(worker), !is.na(spd)) |>
   group_by(year, spd) |>
-  summarise(mean_class = weighted.mean(worker, weight_norm, na.rm = TRUE)) |>
+  summarise(mean_class = weighted.mean(worker, weight, na.rm = TRUE)) |>
   ggplot(aes(x = year, y = mean_class, color = as.factor(spd)))+
   geom_smooth()+
   theme_minimal(base_size = 12) +
@@ -643,7 +596,7 @@ pb |>
 
 ```
 
-## Descriptive plots -- workers and SPD vote intention
+## descriptive plots -- workers and SPD vote intention
 
 Two more exploratory plots, mirroring the AfD section above, that show the range the priors below need to cover across the much longer 1977–2024 span: overall SPD support over time, and SPD support over time split by class.
 
@@ -652,7 +605,7 @@ Two more exploratory plots, mirroring the AfD section above, that show the range
 pb |>
   filter(!is.na(spd)) |>
   group_by(year) |>
-  summarise(mean_spd = weighted.mean(spd, weight_norm, na.rm = TRUE)) |>
+  summarise(mean_spd = weighted.mean(spd, weight, na.rm = TRUE)) |>
   ggplot(aes(x = year, y = mean_spd))+
   geom_smooth()+
   theme_light()
@@ -660,7 +613,7 @@ pb |>
 pb |>
   filter(!is.na(spd), !is.na(class)) |>
   group_by(year, class) |>
-  summarise(mean_spd = weighted.mean(spd, weight_norm, na.rm = TRUE)) |>
+  summarise(mean_spd = weighted.mean(spd, weight, na.rm = TRUE)) |>
   ggplot(aes(x = year, y = mean_spd, color = class))+
   geom_smooth()+
   theme_light()
@@ -672,6 +625,9 @@ pb |>
 Same logic as the AfD prior predictive check above, but for `spd | worker` over the full 1977–2024 span. The span is roughly four times as long as the AfD window, and covers a strong secular decline in SPD support (from well above 30% down to well under 20%) rather than a comparatively flat/rising trend, so the priors are set up differently: the intercept is centred on a plausible mid-range value rather than today's low AfD-style baseline, and the year-level SDs are given more room (a lower exponential rate) so the year random effects — not the fixed intercept — can trace that long decline.
 
 ```{r}
+
+pb_spd <- pb |>
+  filter(year >= 1977 & year <= 2024)
 
 # The intercept is the log-odds of SPD support among non-workers.
 # Over 1977-2024 that probability moved from roughly 30-35% down to
@@ -696,7 +652,7 @@ priors_loyalty_spd <- c(
 )
 
 # Aggregate to year x worker cells, exactly as for the AfD model.
-pb_agg_spd <- pb |>
+pb_agg_spd <- pb_spd |>
   count(year, worker, spd) |>
   tidyr::pivot_wider(names_from = spd, values_from = n, values_fill = 0,
                       names_prefix = "spd_") |>
@@ -719,7 +675,6 @@ m_loyalty_prior_check_spd <- brm(
 # plotted against the actual aggregate SPD proportions -- the
 # observed points should sit comfortably inside the prior bands
 # across the full historical range, not just in recent years.
-
 prior_pred_spd <- pb_agg_spd |>
   distinct(year, worker) |>
   mutate(n_total = 1) |>
@@ -767,84 +722,33 @@ prior_draws_spd |>
 
 ```
 
-
-## Full aggregated model
-
-```{r}
-
-m_loyalty_spd <- brm(
-  spd_1 | trials(n_total) ~ worker + (1 + worker | year),
-  data         = pb_agg_spd,
-  family       = binomial(),
-  prior        = priors_loyalty_spd,
-  backend      = "cmdstanr",
-  threads      = threading(4),
-  chains       = 4,
-  cores        = 4,
-  iter         = 2000,
-  warmup       = 1000,
-  seed         = 1
-)
-
-posterior_spd <- as_draws_df(m_loyalty_spd)
-
-newdata_spd <- expand.grid(
-  year = sort(unique(pb_agg_spd$year)),
-  worker = c(0, 1),
-  n_total = 1
-)
-
-posterior_spd <- m_loyalty_spd |>
-  add_epred_draws(
-    newdata = newdata_spd,
-    re_formula = NULL
-  )
-
-ggplot(data = posterior_spd, aes(x = factor(year), y = .epred)) +
-  stat_gradientinterval()
-
-
-```
-
 ## Loyalty -- Pr(spd|worker)
 
 The SPD analogue of the AfD loyalty models: how likely are workers, versus non-workers, to support the SPD, over the full 1977–2024 span. Same nested-model structure (`m0_spd`, `m1_spd`, `m2a_spd`) and the same convergence/fit checks.
 
 ```{r}
 
-priors_loyalty_spd <- c(
-  prior(normal(-0.7, 0.75), class = "Intercept"),
-  prior(normal(0, 0.75),    class = "b", coef = "worker"),
-  prior(exponential(1.5),   class = "sd"),
-  prior(lkj(2),             class = "cor")
-)
-
-m0_spd <- brm(spd | weights(weight_norm) ~ worker,
-              data = pb,
+m0_spd <- brm(spd | weights(weight) ~ worker,
+              data = pb_spd,
               family = bernoulli(),
               prior = priors_loyalty_spd[1:2, ],
-              iter = 1000, warmup = 500,
               chains = 4, cores = 4, seed = 1,
               backend      = "cmdstanr",
               threads      = threading(4),
               file = here("models", "pb_spd_loyal0"))
 
-m1_spd <- brm(spd | weights(weight_norm) ~ worker + (1 | year),
-              data = pb,
-              family = bernoulli(),
+m1_spd <- brm(spd | weights(weight) ~ worker + (1 | year),
+              data = pb_spd, family = bernoulli(),
               prior = priors_loyalty_spd[c(1,2,3), ],
-              iter = 1000, warmup = 500,
               chains = 4, cores = 4, seed = 1,
               backend      = "cmdstanr",
               threads      = threading(4),
               file = here("models", "pb_spd_loyal1"))
 
-m2a_spd <- brm(spd | weights(weight_norm) ~ worker + (1 + worker | year),
-               data = pb, 
-               family = bernoulli(),
+m2a_spd <- brm(spd | weights(weight) ~ worker + (1 + worker | year),
+               data = pb_spd, family = bernoulli(),
                prior = priors_loyalty_spd,
                chains = 4, cores = 4, seed = 1,
-               iter = 1000, warmup = 500,
                backend = "cmdstanr",
                threads = threading(4),
                file = here("models", "pb_spd_loyal2"))
@@ -861,7 +765,7 @@ The class-voting gap for SPD support, mirroring the AfD ICV plot: the difference
 
 ```{r}
 
-icv_by_year_spd <- pb |>
+icv_by_year_spd <- pb_spd |>
   distinct(year) |>
   tidyr::crossing(worker = c(0, 1)) |>
   add_epred_draws(m2a_spd) |>
@@ -882,38 +786,14 @@ icv_by_year_spd |>
   labs(
     x = NULL,
     y = "P(SPD | worker) − P(SPD | non-worker)",
+    title = "Class voting gap in SPD support, by survey year",
     caption = "Posterior median, 66% and 95% credible intervals"
   ) +
   theme_minimal(base_size = 12) +
   theme(
     panel.grid.minor = element_blank(),
-    axis.line.x = element_line(color = "#c3c2b7"),
-    axis.text.x = element_text(angle = 90)
+    axis.line.x = element_line(color = "#c3c2b7")
   )
-
-ggsave(here("figs", "class_gap_spd.png"),
-       width = 10, height = 7, dpi = 300,
-       bg = "white")
-
-icv_by_year_spd |>
-  ggplot(aes(x = factor(year), y = p_worker1)) +
-  stat_gradientinterval()+
-  scale_y_continuous(limits = c(0, 0.7)) +
-  labs(
-    x = NULL,
-    y = "P(SPD | worker)",
-    caption = "Posterior median, 66% and 95% credible intervals"
-  ) +
-  theme_minimal(base_size = 12) +
-  theme(
-    panel.grid.minor = element_blank(),
-    axis.line.x = element_line(color = "#c3c2b7"),
-    axis.text.x = element_text(angle = 90)
-  )
-
-ggsave(here("figs", "loyalty_worker_spd.png"),
-      width = 10, height = 7, dpi = 300,
-      bg = "white")
 
 ```
 
@@ -938,14 +818,14 @@ The mirror-image question for the SPD: among SPD voters, what share are workers,
 # and non-SPD respondents that the party's working-class base would
 # imply.
 priors_contribution_spd <- c(
-  prior(normal(-0.8, 0.5), class = "Intercept"),
-  prior(normal(0, 0.75),   class = "b", coef = "spd"),
-  prior(exponential(3),    class = "sd"),
-  prior(lkj(2),            class = "cor")
+  prior(normal(0, 0.75),  class = "Intercept"),
+  prior(normal(0, 0.75),  class = "b", coef = "spd"),
+  prior(exponential(1.5), class = "sd"),
+  prior(lkj(2),           class = "cor")
 )
 
 # Aggregate to year x SPD cells, exactly as for the AfD contribution model.
-pb_agg_contrib_spd <- pb |>
+pb_agg_contrib_spd <- pb_spd |>
   count(year, spd, worker) |>
   tidyr::pivot_wider(
     names_from = worker,
@@ -967,7 +847,9 @@ m_contrib_prior_check_spd <- brm(
   backend = "cmdstanr",
   threads = threading(4),
   sample_prior = "only",
-  chains = 4,  cores = 4,  seed = 1
+  chains = 4,
+  cores = 4,
+  seed = 1
 )
 
 # Prior-implied worker probabilities for every year x SPD combination.
@@ -980,7 +862,7 @@ prior_pred_contrib_spd <- pb_agg_contrib_spd |>
   )
 
 # Weighted empirical worker shares for comparison.
-pb_weighted_contrib_spd <- pb |>
+pb_weighted_contrib_spd <- pb_spd |>
   filter(!is.na(worker), !is.na(spd)) |>
   group_by(year, spd) |>
   summarise(
@@ -1022,16 +904,15 @@ ggplot(
 ```{r}
 
 m_contrib_spd <- brm(
-  worker | weights(weight_norm) ~ spd + (1 + spd | year),
-  data = pb, family = bernoulli(link = "logit"),
+  worker | weights(weight) ~ spd + (1 + spd | year),
+  data = pb_spd, family = bernoulli(link = "logit"),
   prior = priors_contribution_spd,
   backend = "cmdstanr",
   threads = threading(4),
-  iter = 1000, warmup = 500,
   chains = 4, cores = 4, seed = 1,
   file = here("models", "pb_spd_contrib"))
 
-contribution_by_year_spd <- pb |>
+contribution_by_year_spd <- pb_spd |>
   distinct(year) |>
   tidyr::crossing(spd = c(0, 1)) |>
   add_epred_draws(m_contrib_spd) |>
@@ -1043,145 +924,10 @@ contribution_by_year_spd |>
   ggplot(aes(x = factor(year), y = p_spd1)) +
   stat_gradientinterval()+
   scale_y_continuous(limits = c(0, 1))+
-  labs(x = NULL,
-  y = "Pr(worker | SPD)")+
   theme_minimal(base_size = 12) +
   theme(
     panel.grid.minor = element_blank(),
-    axis.line.x = element_line(color = "#c3c2b7"),
-    axis.text.x = element_text(angle = 90)
+    axis.line.x = element_line(color = "#c3c2b7")
   )
-
-ggsave(here("figs", "contrib_workers_spd.png"),
-       width = 10, height = 7, dpi = 300,
-       bg = "white")
-
-```
-
-## Estimated share of workers to then calculate PCI
-
-Estimates a baseline quantity needed to interpret the "contribution" numbers in context: the overall share of workers in the electorate each year, regardless of vote choice. Combines this with the posterior draws from the contribution model above to calculate the PCI (comparing the worker share among SPD voters to the worker share in the population as a whole) and plots it by year with uncertainty.
-
-```{r}
-
-priors_worker_share <- c(
-  prior(normal(0, 1.5), class = "Intercept"),
-  prior(exponential(1), class = "sd")
-)
-
-m_worker_share <- brm(
-  worker | weights(weight_norm) ~ 1 + (1 | year),
-  data   = pb,
-  family = bernoulli(),
-  prior  = priors_worker_share,
-  backend = "cmdstanr",
-  iter = 1000, warmup = 500,
-  threads = threading(4),
-  chains = 4, cores = 4, seed = 1,
-  file = here("models", "pb_workers_share_7724")
-)
-
-worker_share_draws <- pb |>
-  distinct(year) |>
-  add_epred_draws(m_worker_share) |>
-  ungroup() |>
-  rename(worker_share = .epred) |>
-  select(year, .draw, worker_share)
-
-pci_by_year <- pb |>
-  distinct(year) |>
-  tidyr::crossing(spd = c(0, 1)) |>
-  add_epred_draws(m_contrib_spd) |>
-  ungroup() |>
-  select(-.row) |>
-  pivot_wider(names_from = spd, values_from = .epred, names_prefix = "p_spd") |>
-  left_join(worker_share_draws, by = c("year", ".draw")) |>
-  mutate(pci = p_spd1 - worker_share)
-
-pci_by_year |>
-  ggplot(aes(x = factor(year), y = pci)) +
-  stat_gradientinterval()+
-  geom_hline(yintercept = 0, linetype = "dotted")+
-  labs(x = NULL, y = "Party Cleavage Index") +
-  theme_minimal(base_size = 12) +
-  theme(
-    panel.grid.minor = element_blank(),
-    axis.line.x = element_line(color = "#c3c2b7"),
-    axis.text.x = element_text(angle = 90)
-  )
-
-ggsave(here("figs", "pci_workers_spd.png"),
-       width = 10, height = 7, dpi = 300,
-       bg = "white")
-
-```
-
-```{r}
-pb_cells <- pb |>
-  filter(!is.na(worker), !is.na(spd), !is.na(weight)) |>
-  group_by(year, worker) |>
-  summarise(
-    p = weighted.mean(spd, weight),
-    n = n(),
-    weight_sum = sum(weight),
-    n_eff = weight_sum^2 / sum(weight^2),
-    .groups = "drop"
-  )
-
-pb_cells |> tt()
-```
-
-# Center-left parties (SPD & Linke)
-
-
-```{r}
-
-priors_loyalty_cl <- c(
-  prior(normal(-0.7, 0.5), class = "Intercept"),
-  prior(normal(0, 0.75),   class = "b", coef = "worker"),
-  prior(exponential(2),    class = "sd"),
-  prior(lkj(2),            class = "cor")
-)
-
-pb_agg_fixed <- pb |>
-  filter(!is.na(worker)) |>
-  filter(v4a == 2) |> 
-  group_by(year, intmonth) |>
-  mutate(weight_norm = pwght / mean(pwght)) |>
-  ungroup() |>
-  group_by(year, worker) |>
-  summarise(
-    n_success = round(sum(weight_norm * centerleft)),
-    n_total   = round(sum(weight_norm)),
-    .groups = "drop"
-  )
-
-pb_cl_agg <- brm(
-  n_success | trials(n_total) ~ worker + (1 + worker | year),
-  data    = pb_agg_fixed,
-  family  = binomial(),
-  prior   = priors_loyalty_cl,
-  chains  = 4, cores = 4, seed = 1,
-  iter    = 1000, warmup = 500,
-  backend = "cmdstanr",
-  file    = here("models", "pb_cl_loyal_agg")
-)
-
-posterior_cl <- as_draws_df(pb_cl_agg)
-
-newdata_cl <- expand.grid(
-  year = sort(unique(pb_agg_fixed$year)),
-  worker = c(0, 1),
-  n_total = 1
-)
-
-posterior_cl <- pb_cl_agg |>
-  add_epred_draws(
-    newdata = newdata_cl,
-    re_formula = NULL
-  )
-
-ggplot(data = posterior_cl, aes(x = factor(year), y = .epred)) +
-  stat_halfeye()
 
 ```

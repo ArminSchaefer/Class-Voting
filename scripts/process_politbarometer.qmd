@@ -83,8 +83,29 @@ pb <- pb_total |>
       v6 == 392 ~ "BSW"),
     afd = ifelse(pvote == "AfD", 1, 0),
     spd = ifelse(pvote == "SPD", 1, 0),
+    centerleft = ifelse(pvote %in% c("SPD", "Linke"), 1, 0),
     year = intyear,
-    weight = if_else(year < 2000, pwght, dwght))
+    month = intmonth,
+    weight = if_else(year < 2000, pwght, dwght)) |> 
+  group_by(year, month) |>
+  mutate(
+    # pwght/dwght are not on a consistent scale across all waves in the
+    # pooled cumulative file -- e.g. 2002 and May-Dec 2009 are roughly
+    # 4x/10x smaller than surrounding waves, almost certainly a source-file
+    # artifact from how the cumulative file was assembled rather than a
+    # genuine change in survey design (mean weight snaps back to the usual
+    # ~0.7 baseline exactly at the next calendar-year boundary in both
+    # cases; within-wave CV is unaffected, only the overall scale). Left
+    # uncorrected, this distorts both point estimates and design-effect-
+    # implied uncertainty whenever waves are pooled (across months within a
+    # year, or across weighted individual-level observations more broadly).
+    # Renormalizing to mean 1 within each wave (year x month) removes the
+    # cross-wave scale inconsistency while leaving genuine within-wave
+    # weighting heterogeneity (e.g. election-proximate waves) untouched.
+    weight_norm = weight / mean(weight, na.rm = TRUE),
+    pwght_norm  = pwght / mean(pwght, na.rm=TRUE)
+  ) |>
+  ungroup()
 
 saveRDS(pb, here("data", "processed", "pb7724.rds"))
 
