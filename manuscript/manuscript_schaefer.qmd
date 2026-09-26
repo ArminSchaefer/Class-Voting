@@ -16,9 +16,13 @@ keywords:
 bibliography: references.bib
 citation-style: apa-no-ampersand.csl
 fontsize: 12pt
+number-sections: true
 format:
   hikmah-pdf: default
   hikmah-manuscript-pdf: default
+include-in-header:
+  text: |
+    \AtBeginDocument{\captionsetup[subfigure]{font=scriptsize, labelfont=scriptsize}}
 ---
 
 ```{r}
@@ -37,18 +41,56 @@ library(gt)
 
 ```
 
-# Introduction
+\pagebreak # Introduction
 
-The literature on political cleavages is interested in how strongly social groups are tied to political parties. For example, scholars ask whether left-wing parties are still the parties of the working class, whether the radical right is the party of older cohorts, and whether women are the core voters of the New Left. But asking these questions can mean two different things: First, one wants to know whether certain groups vote disproportionately for certain parties. Second, we also want to answer the reverse question, which is how much of the total vote for a party comes from a particular social group. It may well be that a group votes disproportionately for a party, but that the party still receives a small share of its votes from that particular group---especially if the group is small or turns out at lower rates than other groups. Hence, to understand cleavages, we need to look at voting patterns of social groups and at the contribution to a party's vote share.
+The concept of class voting has been declared dead many times, only for it to make a resurgence soon after. While it is widely accepted that many social democratic parties have lost much of their working-class support base, and that New Left parties have failed to pick it up, radical right parties are emerging as potential new political homes for the working class. However, from a political sociology perspective, there are at least two distinct ways to answer the question of whether a party can be considered working class. The first, and far more common, perspective asks how likely different social classes are to vote for a party. This has been termed *loyalty*. If workers are more likely than other groups to vote for a party, one could describe it as a working-class party. However, even if this probability is high, it does not necessarily mean that the majority of a party's voters come from the working class. The *contribution* could be low if the group is small or has low turnout rates. For example, jewish citizens in the United States are highly likely to vote for the Democrats, but their contribution remains low given their small share of the population. High loyalty does not imply high contribution.
 
-Over decades, authors have suggested different ways to measure these two elements of cleavage politics. For example, @Alford.1962 introduced the *index of class voting* (ICV) to measure how much more likely workers than non-workers are to vote for left parties, whereas @Axelrod.1972 proposed the *contribution index* to capture the contribution of various groups to party electorates in the US. More recently, @Hooghe.2025 introduced the *Party Cleavage Index* (PCI) to measure the relative size of different voter groups in a party's electorate.
+Loyalty and contribution are simply two different kinds of conditional probability, and both can be expressed with Bayes' rule. The former is the probability of voting for a party given that one belongs to a particular social group, while the latter is the probability of belonging to a particular social group given that one has voted for this party. Over decades, authors have suggested different ways to measure the two elements of class voting. For example, @Alford.1962 introduced the *index of class voting* (ICV) to measure how much more likely workers than non-workers are to vote for left parties, whereas @Axelrod.1972 proposed the *contribution index* to capture the contribution of various groups to party electorates in the US. Although different  scholars have used different methods to calculate loyalty or contribution, these are usually just extensions of basic conditional probabilities. However, it is rare to compare both aspects of class voting systematically in one paper, even though examining just one of them is much less informative. Therefore, I will consider both loyalty and contribution throughout this paper.
 
-In this short note I will show that these different measures can all be expressed using Bayes' rule, although none of the authors mention it. I will first introduce Bayes' rule and then show how it can be used to calculate Alford's ICV, Axelrod's Contribution Index (ACI) and Hooghe and Marks' PCI. Using Bayes' rule has the advantage that we can easily move back and forth between a group's 'loyalty' (relative vote shares) and that group's 'contribution' to a party's total votes, which are but two sides of the same coin. In the second part of this note I will then gradually move to a more Bayesian way of calculating loyalty and contribution, which more clearly expresses the uncertainty of the estimates.
+Loyalty and contribution also speak to different questions. If loyalty of a social group to a party is large---i.e., the probability to vote for this party is very high---these voters could not be available to other parties [@Lewandowsky.2023b]. Most likely, these parties will react over time and seek to mobilise other social groups. In contrast, if the contribution of a social group is large, a party will most likely taylor its programmatic appeals and policies towards this group.^[However, inertia may play a large role in slow adaptation.] If the elecotral coalition is homogeneous, the party-voter alignment is easier than when many different and heterogeneous groups contribute to the overall electorate of a party.
 
-# A brief summary of Bayes' rule
+Recently, considerable attention has been paid to the changing voting behavior of different social groups. In particular, scholars have argued that education may be the most decisive diving line when it comes to GAL and TAN partes.^[GAL stands for green-alternative-liberarian, and TAN for traditional-nationalist-autoritarian parties [see @Marks.2002b; @Hooghe.2025].] Other stress that the interplay of income and education structure voting behaviour most stronlgy [@Gethin.2021; @Kitschelt.2023], while a third group shows how class voting has evolved over time [@Gingrich.2015; @Oesch.2018; @Rennwald.2020]. Finally, many studies have shown that workers have a higher probability of voting for right-wing populist parties (RPP) that other social classes. However, this does not necessarily mean that workers are the largest group in these parties electorates. RPPs could be workig-class in one sense but not in the other. 
+
+The contribution of different social groups to party electorates are important for debates about their stance on social policy and taxation. For example, how parties positions themselves with regard to redistribution and regulation should at least in part also reflect where their votes come from. This topic has received some coverage recently, not least because there is a proletarianisation of RPPs electorates [@Rathgeb.2024b; @Enggist.2022; @Elsasser.2025b; @Biskamp.2026]. In contrast, the growing contribution of highly-educated middle class voters to center-left parties will likely affect their programmes and the emphasis on different types of social policy [@Gingrich.2015]. In short, to understand what parties say and do, it is helpful to not only know who most likely votes for them but also which groups contribute most to the overall vote.
+
+In the empirical section of this paper...
+
+This paper is organized as follows. First, I will discuss the literature on class voting, which has predominantly concentrated on loyalty and only fleetingly mentioned contribution. The next section  introduces Bayes' rule and shows how it can be used to calculate Alford's ICV, Axelrod's Contribution Index (ACI) and Hooghe and Marks' *Party Contribution Index* (PCI). Using Bayes' rule has the advantage that we can easily move back and forth between a group's loyalty (probability to vote for a party) and that group's 'contribution' to a party's total votes. In the second part of this paper, I will then gradually move to a more Bayesian way of calculating loyalty and contribution, which more clearly expresses the uncertainty of the estimates.
+
+# Come back with a vengeance: Class voting over time
+
+
+The study of class voting can be divided into three phases. The first phase lasted from the 1950s to the 1970s. During this period, class voting was clearly evident, with workers---especially unionised workers---predominantly voting for centre-left and radical-left parties. From the 1970s until the end of the 20^th^ century, a more sceptical view emerged. It seemed as if class voting was disappearing in many countries, as the differences in voting behaviour between workers and non-workers were becoming smaller. The third phase began in the late 1990s and early 2000s, when observers noted a shift among sections of the working class towards radical right parties.
+
+During the first phase, it was taken for granted that social cleavages shaped not only party systems but also individual voting behaviour. The interests of rural and urban populations, religious and secular groups, and workers and employers differed, giving rise to political organisations---including trade unions and political parties---that represented these interests. While some cleavages emerged only in particular countries, left-of-centre parties and trade unions representing the interests of the working class developed in most countries, even though they differed considerably in organisational strength [@Lipset.1967b: 66–67].^[One noteworth exception are the United States [@Lipset.2000].] In many cases, several centre-left parties claimed to speak for the working class---and some even incorporated this claim into their names, as did Labour parties in Britain, Spain, and Sweden. In most European countries, social democratic parties were the most successful representatives of the working class at the ballot box, although communist parties dominated in Italy and France until the late 1970s.
+
+For several decades of the 20^th^ century, centre-left parties were not merely working-class parties in programmatic terms; their electorates were also working class in the sense that (manual) workers constituted their largest voter group and had the highest propensity to vote for them. Class position explained a substantial part of voting behaviour:
+
+> Even though many parties renounce the principle of class conflict or loyalty, an analysis of their appeals and their support suggests that they do represent the interests of different classes. On a world scale, the principal generalization which can be made is that parties are primarily based on either the lower classes or the middle and upper classes [@Lipset.1963: 230].
+
+Although the presence of other cleavages sometimes conflicted with this pattern---for example, where a Christian Democratic party existed and Catholic workers therefore faced competing loyalties---empirical studies from the 1960s provided clear evidence that occupational position was reflected in voting behaviour: workers voted for left-wing parties to a much greater extent than farmers, (higher) white-collar employees, or the self-employed [@Lipset.1967b: 62–63, footnote 81; @Alford.1967; @Lipset.1963: 235–238].
+
+From the 1970s onwards, however, the association between class position and voting behaviour weakened. Accordingly, in the revised edition of *Political Man*, @Lipset.1983[: 504–505] emphasised the decline of class voting, and a decade later he went so far as to argue that social classes were "dying out" and becoming irrelevant to political sociology [@Clark.1991]. Although inequality persisted, it increasingly revealed less about the values and behaviour of those located at the bottom or top of the distribution. Rising prosperity, the "embourgeoisement" of workers, increasing social and spatial mobility, and the spread of post-materialist values all reduced the explanatory power of the concept of class [@Inglehart.1986]. In Germany, Ulrich Beck in particular argued that processes of individualisation eroded all forms of class consciousness and, as a consequence, that labour-market position no longer shaped attitudes or guided behaviour [@Beck.1983: 56].
+
+The declining political significance of class is often demonstrated using the "Alford index". This index of class voting measures the extent to which the proportion of workers (more specifically, manual workers) voting for left-wing parties exceeds the corresponding proportion among all other classes (see @sec-alford). When Alford (1967: 82) developed the index using evidence from four Anglo-Saxon democracies, he found particularly high values for Britain and Australia, while class voting was less pronounced in the United States and Canada. Proponents of the decline thesis, such as Inglehart and Rabier [-@Inglehart.1986: 463], Clark and Lipset [-@Clark.1991: 403; @Clark.2001b: 100], and Dalton [-@Dalton.2002: 152], point to the decline of the Alford index as evidence of the declining political relevance of class.
+
+The approach of capturing class voting in a four-cell matrix---cross-tabulating manual and non-manual occupations against voting for left-wing parties and all other parties---has been criticised by proponents of the class concept as methodologically inadequate. First, the explanatory variable is ill-suited to capturing differences, for example, between unskilled and skilled workers or within the middle class. Second, the dependent variable not only obscures changes in the relative strength of parties within a particular camp; it also fails to account for the emergence of new parties that are difficult to locate on the left–right axis. A more appropriate approach, it has been argued, is to employ a detailed class schema based on the market position and work situation of employees [@Brauns.2000: 10–11; @Oesch.2006]. Rather than a dichotomous dependent variable, the choice among all major parties should also be taken into account. Studies that address these two objections have, in some cases, challenged the claim of a continuous decline in class voting, pointing instead to "trendless fluctuation" [@Heath.1985: 35; @Heath.1996; @Goldthorpe.1999], although a comprehensive cross-national comparison confirms the decline [@Nieuwbeerta.1999].
+
+One problem with the studies discussed so far is that many do not take the option of non-voting into account. They analyse only which party an individual intends to vote for, thereby excluding those who do not intend to vote. Yet as non-voters constitute an increasingly large group, and if electoral participation correlates with socio-economic status, there is a risk that the effect of class on voting behaviour is underestimated. Accordingly, studies that take non-voting into account find a substantial association between class position and electoral behaviour [@Hout.1995; @Weakliem.1999; @Gattig.2006: 528; @Schafer.2015: ch. 6].
+
+However, the view that class no longer shapes voting behaviour has lost its credibility also on another count. New patters of class voting emerged with the rise of right-wing populist parties. While the New Left has drawn its support less from workers than from highly educated urbanites, the radical populist right has been gaining support among the (male) working-class. Several studies show that the proposenity to vote for these parties is higher among workers than among other social classes and has increased over time [@Lubbers.2002: 364; @Arzheimer.2006b: 429-430; @Oesch.2008: 357; @Arzheimer.2013: 82-83; @Bornschier.2013: 19-20; @Rooduijn.2017: 550; @Carella.2020: 13]. Most of these studies only focus on loyalty rather than contribution and offer only hints at the overall composition of the RPP's electorate. However, @Oesch.2018[: 793] note that half of the electorate of radical right partis come from the working class. Following up on this reaserch, I will therefore present estimates of loyalty and contribution in the empirical section of this paper.
+
+It can be concluded that, although class has never entirely disappeared as a factor shaping voting behaviour, its importance has reasserted itself forcefully over the last ten to fifteen years, with right-wing populist parties establishing themselves as a significant electoral force across many countries.
+
+# Measuring Loyality and Contribution
+
+In this section, I will first show that one can express "loyalty" and "contribution" with Bayes' rule and then apply it to the Alford Index, the Contribution Index and the Party Cleavage Index. The first subsection summarises Bayes' rule to explain that it can express both loyalty (the propensity of a group to vote for a party) and contribution (the share of a group among the total electorate of a party).
+
+## A brief summary of Bayes' rule
 
 Bayes' rule is a simple formula that allows us to calculate the probability of an event given that another event has occurred. Thus, it focuses on the conditional probability of event A given event B. @tbl-notation concentrates on 'two events' that can occur together or seperately. The joint probability of being a worker and voting for a Left party can be expressed as $Pr(A \cap B)$. The marginal probability of being a worker is $Pr(B)$ and the marginal probability of voting for a Left party is $Pr(A)$. The conditional probability of voting for a Left party given that one is a worker is $Pr(A | B)$. It is the share of all workers who vote for a Left party, and thus $Pr(A \cap B)$ divided by $Pr(B)$.
 
+\small
 |                  | Left Party (A)   | Other Party (\~A)  |    Sum    |
 |:---------------- |:----------------:|:------------------:|:-----------:|
 | Worker (B)       |  Pr(A $\cap$ B)  |  Pr(\~A $\cap$ B)  |  **Pr(B)**  |
@@ -57,68 +99,76 @@ Bayes' rule is a simple formula that allows us to calculate the probability of a
 
 : Workers and Left vote. {#tbl-notation}
 
-We can thus move back and forth between the conditional and the joint probability by rewriting the following formula:
+\normalsize We can thus move back and forth between the conditional and the joint probability by rewriting the following formula:
 
 The conditional probability of A given B is 
 
+\small
 $$
 Pr(A | B) = \frac{Pr(A \cap B)}{Pr(B)}
 $$ {#eq-cond_a_b}
-
+\normalsize
 
 @eq-cond_a_b can be rewritten as the joint probabililty of A and B as 
 
+\small
 $$
 Pr(A \cap B) = Pr(A | B) \times Pr(B)
 $$ {#eq-joint_a_b}
 
-Since the joint probability of B and A is $Pr(B \cap A)$, we can also write 
+\normalsize Since the joint probability of B and A is $Pr(B \cap A)$, we can also write 
 
+\small
 $$
 Pr(B \cap A) = Pr(B | A) \times Pr(A)
 $$ {#eq-joint_b_a}
 
-Finally, we can equate @eq-joint_a_b and @eq-joint_b_a: The joint probability of being a worker and voting left is the same as voting left and being a worker. This is the first step to derive Bayes' rule.
+\normalsize Finally, we can equate @eq-joint_a_b and @eq-joint_b_a: The joint probability of being a worker and voting left is the same as voting left and being a worker. This is the first step to derive Bayes' rule.
 
+\small
 $$
 Pr(A | B) \times Pr(B) = Pr(B | A) \times Pr(A)
 $$ {#eq-equating}
 
-The second step is to divide both sides by $Pr(B)$ to get the formula for Bayes' rule: 
+\normalsize The second step is to divide both sides by $Pr(B)$ to get the formula for Bayes' rule: 
 
+\small
 $$
 Pr(A | B) = \frac{Pr(B | A) \times Pr(A)}{Pr(B)}
 $$ {#eq-bayes1} 
 
-Obviously, we can also solve @eq-equating for the 'inverse probability' of being a worker given that one voted for the Left party: 
+\normalsize Obviously, we can also solve @eq-equating for the 'inverse probability' of being a worker given that one voted for the Left party: 
 
+\small
 $$
 Pr(B | A) = \frac{Pr(A | B) \times Pr(B)}{Pr(A)}
 $$ {#eq-bayes2}
 
-The elegant element of using Bayes' rule is that @eq-bayes1 is what @Hooghe.2025 call the "voter perspective" and @eq-bayes2 is the "party perspective", or, in Axelrod's [-@Axelrod.1972] term, the "contribution" of social group to a party's vote. The probability of a group voting for a party and the contribution of a group to a party's total vote are two sides of the same coin. But they are not the same thing.
+\normalsize The elegant element of using Bayes' rule is that @eq-bayes1 is what @Hooghe.2025 call the "voter perspective" and @eq-bayes2 is the "party perspective", or, in Axelrod's [-@Axelrod.1972] term, the "contribution" of social group to a party's vote. The probability of a group voting for a party and the contribution of a group to a party's total vote are two sides of the same coin. But they are not the same thing.
 
-# Measuring Loyality and Contribution
+### The Alford Index {#sec-alford}
 
-## The Alford Index
-
-The Alford index, introduced in the 1960s, has been widely used to measure whether social democratic or centre-left parties are still the parties of the working class. Indeed, many studies claiming that class voting had ended use this simple measure: A decline in the Alford Index was taken as a sign that class had ceased to be a useful category for analysing voting behaviour [@Inglehart.1986: 463; @Clark.1991: 403; @Dalton.2002: 152; @Gingrich.2015: 57]. In highly individualised and pluralist societies, class voting was declared 'dead' [@Clark.2001].^[More complex approaches come to more nuanced and in part conflicting results [e.g. @Evans.2000; @vanderWaal.2007; @Hout.2010], but that is not our main concern here.]
+The Alford index, introduced in the 1960s, has been widely used to measure whether social democratic or centre-left parties are still the parties of the working class. Indeed, many studies claiming that class voting had ended use this simple measure: A decline in the Alford Index was taken as a sign that class had ceased to be a useful category for analysing voting behaviour [@Inglehart.1986: 463; @Clark.1991: 403; @Dalton.2002: 152; @Gingrich.2015: 57]. In highly individualised and pluralist societies, class voting was declared 'dead' [@Clark.2001].^[More complex approaches come to more nuanced and in part conflicting results [e.g. @Evans.2000; @vanderWaal.2007; @Hout.2010], but that is not the main concern here.]
 
 Alford's *index of class voting* is calculated as the conditional probability to vote for the Left, given that your are a worker, minus the probability of a Left vote given that you are not a worker [@Alford.1962: 422]:^[The "~" symbol means "not".]
 
+\small
 $$
 Pr(Left | Worker) - Pr(Left | \mathord{\sim}Worker)
 $$ {#eq-alford1}
 
-To apply the formula more generally to social groups and parties, we can re-write it as follows:
+\normalsize To apply the formula more generally to social groups and parties, we can re-write it as follows:
 
+\small
 $$
 Pr(Party_j | Group_i) - Pr(Party_j | \mathord{\sim}Group_i)
 $$ {#eq-alford2}
 
-To calculate the ICV, we simply need to define which parties are left-wing and which are not, and collect information on the voting behaviour of workers and non-workers. One strength of the Alford index is that it can be calculated over long periods of time and across countries. Another is that it fits well with the way political scientists analyse voting behaviour. We often look for the factors that influence voting for a party or family of parties and then calculate the probability of voting for party *j* for group *i*. For example, studies have looked at the likelihood of voting for the radical right among women and men, age and education groups, or indeed social classes. The ICV is an effective way of describing the behavioural differences between these groups.
+\normalsize To calculate the ICV, we simply need to define which parties are left-wing and which are not, and collect information on the voting behaviour of workers and non-workers. One strength of the Alford index is that it can be calculated over long periods of time and across countries. Another is that it fits well with the way political scientists analyse voting behaviour. We often look for the factors that influence voting for a party or family of parties and then calculate the probability of voting for party *j* for group *i*. For example, studies have looked at the likelihood of voting for the radical right among women and men, age and education groups, or indeed social classes. The ICV is an effective way of describing the behavioural differences between these groups.
 
 @Hooghe.2025[: 18] provide the following example from two German elections:
+
+\small
 
 |                      | 1957  | 2017  |
 |:------------------   |:------|:------|
@@ -128,7 +178,7 @@ To calculate the ICV, we simply need to define which parties are left-wing and w
 | ICV                  | 23.9  | 3.99  |
 : Workers and SPD vote share in Germany, 1957 and 2017. {#tbl-spd}
 
-To get the ICV, we have to compute the share of non-workers who voted for the SPD. 
+\normalsize To get the ICV, we have to compute the share of non-workers who voted for the SPD. 
 
 $0.343 \times 0.474 + x \times 0.526 = 0.217$
 
@@ -142,11 +192,14 @@ While 34.3 per cent of workers voted for the SPD in 1957, only 10.4 per cent of 
 
 As shown in the previous section, we can express the conditional probability of voting Social Democrats for workers and non-workers using Bayes' rule, which means that we can re-write @eq-alford1 in the following way:
 
+\small
 $$
 ICV = \left(\frac{Pr(Worker | SPD) \times Pr(SPD)}{Pr(Worker)} \right) - \left(\frac{Pr(\mathord{\sim}Worker | SPD) \times Pr(SPD)}{Pr(\mathord{\sim}Worker)}\right)
 $$ {#eq-icv_bayes}
 
-To show that we arrive at the same result as before using this version, we turn the figures for the 1957 election in Germany into a joint probability table, in which the cells add up to one.^[We get the number in the upper left cell by multiplying the proportion of workers who voted for the SPD by the proportion of workers in society (0.343 * 0.474 = 0.1625).]
+\normalsize To show that we arrive at the same result as before using this version, we turn the figures for the 1957 election in Germany into a joint probability table, in which the cells add up to one.^[We get the number in the upper left cell by multiplying the proportion of workers who voted for the SPD by the proportion of workers in society (0.343 * 0.474 = 0.1625).]
+
+\small
 
 |          | SPD     | ~SPD   | sum    |
 |:---------|:--------|:-------|:-------|
@@ -155,30 +208,38 @@ To show that we arrive at the same result as before using this version, we turn 
 | sum      | 0.217   | 0.783  | 1      |
 : Joint probability table for SPD vote in 1957. {#tbl-joint_spd}
 
-The figures in @tbl-joint_spd show that roughly one third of the 47% workers in society opted for the SPD in 1957 but only one out of ten non-workers.^[Note, however, that "not SPD" includes all the other parties as well as nonvoters.] We now calculate the probability of workers voting for the SPD and subtract the probability of non-workers voting for the SPD if we plug in the number into @eq-icv_bayes and arrive---except for rouding errors---at the same result.
+\normalsize The figures in @tbl-joint_spd show that roughly one third of the 47% workers in society opted for the SPD in 1957 but only one out of ten non-workers.^[Note, however, that "not SPD" includes all the other parties as well as nonvoters.] We now calculate the probability of workers voting for the SPD and subtract the probability of non-workers voting for the SPD if we plug in the number into @eq-icv_bayes and arrive---except for rouding errors---at the same result.
 
+\small
 $$
 ICV = \frac{\frac{0.163}{.0217} \times 0.217}{0.474} - \frac{\frac{0.054}{.0217} \times 0.217}{0.526} = 0.242
 $$ {#eq-icv_bayes_spd}
 
-## Axelrod's Contribution Index
+\normalsize
+
+### Axelrod's Contribution Index
 
 In the next step I look at the second perspective on cleavages, which is the *contribution* of a group to a party's vote share. When Alford applied the ICV to GB, Australia, Canada and the United States, he focused on manual workers, who made up about 40 per cent of the population at the time [@Alford.1967: 74, Table 1]. In the two countries with high values of the ICV, Britain and Australia, this meant not only that workers were considerably more likely to vote for left parties, but also that the majority of voters for these parties were workers. However, @Alford.1967[: 80] fully acknowledges that his index does 'leave aside' the 'degree of class distinctiveness of the Left party (the proportion of support for the Left party drawn from workers)'---which is nothing other than the contribution.
 
 In his article, Axelrod starts from the observation that neither practitioners nor scholars know much about the support coalitions of US parties. He is not primarily interested in how likely a group is to vote for one of the two parties, but in how much of the party's votes come from that group. He thus introduces the *Contribution Index* (ACI) to measure the contribution of different groups to the party vote in the US. Axelrod.1972[: 11] identifies three factors that determine a group's contribution to a party's vote: 'the size of the group, its turnout, and its loyalty to the given party.' Loyality is the likelihood of voting for a party in a given group. He suggests the following formula to calculate the contribution of group *j* to party *i*:
 
+\small
 $$
 Contribution_i = \frac{Loyalty_j \times Size_j}{Loyalty} \times \frac{Turnout_j}{Turnout}
 $$ {#eq-ACI}
 
-Again, we can express this formula using Bayes' rule because the contribution is the probability to belong to group *j* given that one votes for party *i* and loyalty is the likelihood to vote for party *i* given one is a member of group *j*:
+\normalsize Again, we can express this formula using Bayes' rule because the contribution is the probability to belong to group *j* given that one votes for party *i* and loyalty is the likelihood to vote for party *i* given one is a member of group *j*:
+
+\small
 $$
 Pr(Group_j|Party_i) = \frac{Pr(Party_i | Group_j) \times Pr(Group_j)}{Pr(Party_i)} \times \frac{Pr(Turnout_j)}{Pr(Turnout)}
 $$ {#eq-ACI_bayes}
 
-If we use survey data to calculate the contribution, we can incorporate turnout to the measurement of loyalty and thus the latter part of @eq-ACI_bayes is not necessary and the equation has exactly the same structures as @eq-bayes2.
+\normalsize If we use survey data to calculate the contribution, we can incorporate turnout to the measurement of loyalty and thus the latter part of @eq-ACI_bayes is not necessary and the equation has exactly the same structures as @eq-bayes2.
 
 In the article, Axelrod provides data for a number of groups to caculate their contribution the the Democratic and Republican vote in several elections. @tbl-black shows the loyalty, turnout and size only of Black voters in 1952 and 1968 and focuses on the Democrats. The probability to vote for the Democrats is the product of turnout and loyalty.
+
+\small
 
 |      | Loyalty | Turnout | Size | NT   | NL    | ACI   |
 |------|---------|---------|------|------|-------|-------|
@@ -186,29 +247,32 @@ In the article, Axelrod provides data for a number of groups to caculate their c
 | 1968 | 0.92    | 0.51    | 0.11 | 0.62 | 0.427 | 0.197 |
 : Loyalty, turnout and group size of Black voters in US elections. {#tbl-black}
 
-We can calculate the contribution of Black to the Democratic vote in 1952 using @eq-ACI_bayes:
+\normalsize We can calculate the contribution of Black to the Democratic vote in 1952 using @eq-ACI_bayes:
+
+\small
 $$
 Pr(Black | Dem) = \frac{(0.83 \times 0.23) \times 0.1}{(0.444 \times 0.63)} = 0.068
 $$ {#eq-ACI_bayes_black}
 
-In 1952, Black voters---also due to their suppressed turnout---contributed only 6.8. per cent to the Democratic vote, despite the fact that their loyalty was high. In 1968, the contribution rose to 19.7 per cent because even higher loyalty and higher turnout after the Voting Rights Act of 1965. And, of course, we can use the contribution to calculate the probability of Blacks to vote for the Democrats in 1952 with @eq-bayes1, which is $Pr(Dem|Black) = 0.068 \times 0.444 \times 0.63 / 0.1 = 0.19$ or 19 per cent.
+\normalsize In 1952, Black voters---also due to their suppressed turnout---contributed only 6.8. per cent to the Democratic vote, despite the fact that their loyalty was high. In 1968, the contribution rose to 19.7 per cent because even higher loyalty and higher turnout after the Voting Rights Act of 1965. And, of course, we can use the contribution to calculate the probability of Blacks to vote for the Democrats in 1952 with @eq-bayes1, which is $Pr(Dem|Black) = 0.068 \times 0.444 \times 0.63 / 0.1 = 0.19$ or 19 per cent.
 
-## Party Cleavage Index
+### Party Cleavage Index
 
-In a recent article, @Hooghe.2025 introduce the *Party Cleavage Index* (PCI) as a measure of the relative size of different voter groups in a party's electorate. They build on an earlier article that developed a measure to calculate the 'social basis of parties' [@Marks.2023]. Without using the vocabulary, the authors use Bayes' rule to calculate the PCI. Whlie ICV is based on the probability of (manual) workers and non-workers to vote for the left, the PCI is---as Axelrod's contribution index---based on the 'inverse probability' of being a worker given that one voted for the left or, more generally, the probability of belonging to group _i_ given that one has voted party _j_. 
+In a recent article, @Hooghe.2025 introduce the *Party Cleavage Index* (PCI) as a measure of the relative size of different voter groups in a party's electorate. They build on an earlier article that developed a measure to calculate the "social basis of parties" [@Marks.2023]. Without using the vocabulary, the authors use Bayes' rule to calculate the PCI. Whlie ICV is based on the probability of workers and non-workers to vote for the left, the PCI is---as Axelrod's contribution index---based on the "inverse probability" of being a worker given that one voted for the left or, more generally, the probability of belonging to group _i_ given that one has voted party _j_.
 
 Thus, while the ICV calculates the proportion of workers who vote for a left-wing party and subtracts the proportion of non-workers who vote for a left-wing party [@Alford.1967: 80], the PCI asks: Given that a person votes for a party, what is the probability that this person is a worker? In a second step, this probability is then subtracted from the probability of being a worker to see if workers vote disproportionately for this party. This logic can be applied to any other social group and @Hooghe.2025 are most interested in the composition of GAL and TAN parties and focus on education groups.
 
 At the heart of the PCI is the contribution of a group to a party's vote, from which the group size is subtracted. Since @Hooghe.2025 want to provide a general forumula that applies to different parties and different social groups, they use the following notation:
 
+\small
 $$
 PCI = P_{ij}^{S} = \frac{\pi_{ilj}^{S} \times \pi_{j}^{S}}{\pi_{jli}} - \pi_{j}^{S}
 $$ {#eq-pci}
 
-@eq-pci assesses the probability of belonging to group *j* with the characteristc *s* (which could for example be gender, education, class or religious denomination) given that one has voted for party *i*. To arrive at the contribution, the probability of voting for party *i* given that one belongs to group *j* with the characteristic *s* is multiplied by the probability to belong to the specific group in question. This product is then divided by the probability of voting for party *i* for any group (i.e. the overall vote share of the party). In other words, they divide the product of the group size and the group vote for a party by the party's overall share of the vote. In other words the PCI is the contribution of a group minus the group size.
+\normalsize @eq-pci assesses the probability of belonging to group *j* with the characteristc *s* (which could for example be gender, education, class or religious denomination) given that one has voted for party *i*. To arrive at the contribution, the probability of voting for party *i* given that one belongs to group *j* with the characteristic *s* is multiplied by the probability to belong to the specific group in question. This product is then divided by the probability of voting for party *i* for any group (i.e. the overall vote share of the party). In other words, they divide the product of the group size and the group vote for a party by the party's overall share of the vote. In other words the PCI is the contribution of a group minus the group size.
 
 As shown above, the *contribution* of a group to a party's vote is nothing but Bayes' rule. Let me re-write @eq-pci in the familiar form:
-
+\small
 $$
 PCI = Pr(Group_j | Party_i) - Pr(Group_j) =
 $$ 
@@ -216,37 +280,204 @@ $$
  \frac{Pr(Party_i | Group_j) \times Pr(Group_j)}{Pr(Party_i)} - Pr(Group_j)
 $$ {#eq-pci_bayes}
  
-To return to the example in @tbl-joint_spd, we can use it to calculate the contribution of workers to the SPD vote in 1957.
-
+\normalsize To return to the example in @tbl-joint_spd, we can use it to calculate the contribution of workers to the SPD vote in 1957.
+\small
 $$
 Pr(Worker | SPD) = \frac{\frac{0.1625}{0.474} \times 0.474}{0.217} = 0.749
 $$
 
-If we subtract the share of workers in society (0.474) from the contribution of workers to the SPD vote (0.749), we get the PCI for workers in 1957, which is 0.275. This corresponds to the result in Table 1 of @Hooghe.2025[: 18], except for rounding errors.
+\normalsize If we subtract the share of workers in society (0.474) from the contribution of workers to the SPD vote (0.749), we get the PCI for workers in 1957, which is 0.275. This corresponds to the result in Table 1 of @Hooghe.2025[: 18], except for rounding errors.
+
+# Data and Methods {#sec-data}
+
+In this paper, I use two datasets. First, I analyze data from the German *Politbarometer*, which is a monthly reprensenative survey that has been running since 1977. The lastest available year is 2024. It contains a measure of class and asks each month which party respondents would vote for if there were a general election next Sunday. So, it focuses on vote intention rather than past voting behaviour. The main advantage of this data is the long time series, which makes it possible to trace changes over more than 45 years. The second data comes from the 11^the^ wave of the *European Social Survey*. In a set of cross-sectional analyses, I focus on class voting in 10 European countries. The class measure is based Daniel Oesch's [-@Oesch.2006b] class concept.^[I followed the scripts provided on his website: https://people.unil.ch/danieloesch/scripts/.] For most analyses, I reduce the class scheme to a binary measure distinguishing wokers and non-workers but the Appendix contains further analyses with five occupational classes.
+
+The quantities introduced in the previous section could be calculated directly from a cross-tabulation, but such point estimates hide how uncertain they are. This matters especially when group sizes and voting behaviour change over time. It also matters when the same quantity is compared across many survey years or countries. I therefore estimate loyalty with Bayesian logistic regression models. A Bayesian model combines the information in the data (the *likelihood*) with explicit assumptions about plausible parameter values before seeing the data (the *priors*). The result is a *posterior distribution*: a full description of which parameter values are compatible with both. Bayes' rule, which I used above to move between loyalty and contribution, is the same principle applied here to the model parameters rather than to social groups and parties. In practice, the posterior is approximated by several thousand random draws. Any quantity calculated from these draws, including loyalty, the ICV and contribution, automatically inherits their uncertainty. I write the models in the notation used by @McElreath.2020, which lists each assumption of the model on a separate line:
+
+\small
+
+$$
+\begin{aligned}
+V_i &\sim \text{Bernoulli}(p_i) \\
+\text{logit}(p_i) &= \alpha_{j[i]} + \beta_{j[i]} W_i \\
+\begin{bmatrix} \alpha_j \\ \beta_j \end{bmatrix} &\sim \text{MVNormal}\left( \begin{bmatrix} \bar{\alpha} \\ \bar{\beta} \end{bmatrix}, \mathbf{S} \right) \\
+\mathbf{S} &= \begin{pmatrix} \sigma_\alpha & 0 \\ 0 & \sigma_\beta \end{pmatrix} \mathbf{R} \begin{pmatrix} \sigma_\alpha & 0 \\ 0 & \sigma_\beta \end{pmatrix} \\
+\bar{\alpha} &\sim \text{Normal}(-2, 1) \\
+\bar{\beta} &\sim \text{Normal}(0, 1) \\
+\sigma_\alpha, \sigma_\beta &\sim \text{Exponential}(1) \\
+\mathbf{R} &\sim \text{LKJcorr}(2)
+\end{aligned}
+$$ {#eq-model}
+
+\normalsize The first line states that the vote of respondent $i$, $V_i$, is either for the party in question (1) or not (0), and that it occurs with probability $p_i$. The second line links this probability to class. $W_i$ equals 1 for workers and 0 for non-workers, and the logit function keeps $p_i$ between zero and one. The intercept $\alpha$ describes the propensity of non-workers to vote for the party. The slope $\beta$ is the additional propensity of workers. Loyalty is thus $\text{logit}^{-1}(\alpha + \beta)$ for workers and $\text{logit}^{-1}(\alpha)$ for non-workers, and their difference is the Alford index. The subscript $j[i]$ indicates that both parameters are allowed to vary across the units in which respondent $i$ is nested. These units are survey years in the *Politbarometer* and countries in the ESS. The third and fourth lines make this a *multilevel* (or hierarchical) model. The year- or country-specific intercepts and slopes are not estimated in isolation. They are treated as draws from a common distribution with means $\bar{\alpha}$ and $\bar{\beta}$, standard deviations $\sigma_\alpha$ and $\sigma_\beta$, and a correlation matrix $\mathbf{R}$. The model therefore learns from the data how different years or countries really are. Estimates based on few respondents are pulled towards the overall mean ("partial pooling"), whereas estimates based on ample data are left largely untouched. This protects against over-interpreting noisy fluctuations, for example in small national samples of radical-right voters. I build the models up in steps: a pooled model that ignores all differences between units, then a model with varying intercepts only, and finally the model with varying intercepts and slopes shown in @eq-model.
+
+The remaining lines specify the priors (for the full list of priors see @sec-appendix). They are deliberately *weakly informative*. The prior for $\bar{\alpha}$ encodes the modest expectation that an average party family receives the vote of a minority of non-workers ($\text{logit}^{-1}(-2) \approx 0.12$), while still allowing values between roughly 2 and 50 per cent. The prior for $\bar{\beta}$ is centred on zero. It thus assumes no class difference at the outset and lets the data establish whether workers are more or less loyal than non-workers. The exponential and LKJ priors merely rule out implausibly large differences between units and implausibly strong correlations between intercepts and slopes. Prior predictive simulations confirm that these assumptions produce plausible vote shares before the data are introduced (see Appendix). Contribution is not estimated with a separate vote model. Instead, it is derived from the posterior via Bayes' rule (@eq-bayes2). To do so, I estimate the share of workers in each unit, $\Pr(W)$, with an analogous intercept-only multilevel model. For every posterior draw, I then compute $\Pr(W \mid V) = \Pr(V \mid W)\Pr(W) / \Pr(V)$. The result is a full posterior distribution of the contribution of workers to each party's vote, rather than a single number, and it is computed from exactly the same draws as loyalty. All models are estimated in R with *brms* [@Burkner.2017], which uses Stan's Hamiltonian Monte Carlo sampler. Survey weights enter the likelihood as observation weights.^[Strictly speaking, this yields a weighted pseudo-likelihood rather than a full Bayesian treatment of the complex sampling design. Unweighted models lead to substantively identical conclusions (see Appendix).]
+
+In a final step, I add age group, gender, marital status and migration background to the linear predictor, which then becomes $\alpha_{j[i]} + \beta_{j[i]} W_i + \mathbf{x}_i'\boldsymbol{\gamma}$, where $\mathbf{x}_i$ contains these characteristics and each element of $\boldsymbol{\gamma}$ receives a Normal(0, 0.5) prior. This model asks whether workers differ from non-workers in their voting behaviour only because they differ in these respects, for example because workers are disproportionately male. The coefficients in $\boldsymbol{\gamma}$ adjust for this composition and do not identify causal effects. However, adding these covariates does not substantially alter the results.
 
 # Class voting
 
-This section will first look at long-term trends of class voting in Germany and then turn to an international comparison.
+This section will first look at long-term trends of class voting in Germany and then turn to an international comparison. 
+
+## Long-term trends in Germany
+
+For the German data, I examine voting intentions for the Social Democrats (SPD) from 1977 to 2024 and for the far-right populist party Alternative für Deutschland (AfD) from 2013 to 2024. @fig-spd_loyal-1 shows that the estimated probability of workers voting for the SPD fluctuated between 50 and 60 per cent until the late 1980s. After reunification, however, worker loyalty dropped substantially. In the run-up to the first general election after reunification, the SPD was generally unpopular, including among workers. The Christian Democrats under Helmut Kohl were widely seen as the party of unification, and the economic upheavals that would later occur had not yet taken place. However, as economic conditions worsened and many citizens grew tired of the long-serving chancellor, working-class voters again indicated a preference for the Social Democrats in the late 1990s. Gerhard Schröder, who had risen from a very modest working-class background, seemed a credible challenger for power.
 
 ```{r}
-#| label: fig-classgapspd
-#| fig-cap: "The gap between workers and non-workers in the SPD vote"
+#| label: fig-spd_loyal
+#| out-width: 100%
+#| fig-cap: "Workers and the SPD vote, 1977--2024"
+#| fig-subcap:
+#|   - "Loyalty: propensity of workers to vote for the SPD"
+#|   - "Gap between workers and non-workers in the SPD vote"
+#| layout-ncol: 2
 #| echo: false
 #| fig-pos: "H"
-#| out-width: 90%
 
+knitr::include_graphics(here("figs", "loyalty_worker_spd.png"))
 knitr::include_graphics(here("figs", "class_gap_spd.png"))
 
 ```
 
+However, the introduction of unpopular social policy reforms undermined workers' loyalty to the SPD. Disputes surrounding Agenda 2010 resulted in a split with the trade unions and caused many working-class voters to either abstain or turn to the Left Party or the newly founded WASG party. Since around 2005, the proportion of workers voting for the SPD has decreased. In the latest year for which figures are available, support hovers around 20 per cent---roughly a 40 per cent decline from earlier periods.
+
+The waning support for the SPD among working-class citizens is also evident in  @fig-spd_loyal-2, which illustrates the Alford Index ($Pr(SPD|worker) - Pr(SPD|non-worker)$) . In the 1980s, the gap between workers' and non-workers' loyalty to the Social Democrats in Germany was 15–20%. This figure dropped to 5-10% in the 2000s, and has declined further since then. Currently, the gap stands at 2-3%. In other words, workers are hardly more likely to vote for the SPD than non-workers.
+
+Next, I will turn to "contribution". Loyalty does not reflect the size of a group. The reversed perspective asks how much a group contributes to a party's overall vote. @fig-spd_contrib-1 illustrates that workers' contribution to the SPD vote has halved from around 50 per cent to 25 per cent between 1977 and 2024. The vast majority of the remaining SPD electorate now comes from higher-grade employees and civil servants rather than the working class. This will undoubtedly affect the party's electoral platform, especially since active party members [@Klein.2019] and legislators are even less likely to come from the working class [@Elsasser.2024].
+
+```{r}
+#| label: fig-spd_contrib
+#| out-width: 100%
+#| fig-cap: "Workers' share of the SPD vote, 1977--2024"
+#| fig-subcap:
+#|   - "Contribution: Share of workers of all SPD voters"
+#|   - "PCI: Gap between workers' and non-workers' contribution to the SPD"
+#| layout-ncol: 2
+#| echo: false
+#| fig-pos: "H"
+
+knitr::include_graphics(here("figs", "contrib_workers_spd.png"))
+knitr::include_graphics(here("figs", "pci_workers_spd.png"))
+
+```
+
+Finally, the Party Cleavage Index, shown in @fig-spd_contrib-2, has also declined to zero over time. That means that the share of workers among the SPD electorate no longer exceeds the share of workers in society, which it did in earlier times.
+
+Taken together, these results confirm that the SPD in Germany can no longer be considered a working-class party. Workers' loyalty and contribution have declined over time, and today they are hardly more likely to vote for the SPD than non-workers, contributing only a quarter of the overall votes. While there have been some up- and downward fluctuations in these long-term trends, it seems unlikely that the SPD can reverse them.
+
+In the next step, I turn to the AfD vote. Since it was established in 2013, the AfD has been gaining support from working-class workers. At first, as @fig-afd_loyal-1 shows, the propensity of workers to vote for the AfD was low. It was founded as a party mainly opposed to the Euro and the key personnel were economics professors who thought that the common currency would harm the Germany economy. Migration was not a prominent topic on the party's agenda and, until 2015/2016 many observers did not see it as a populist party [@Arzheimer.2015; @Berbuir.2015]. After the so called "refugee crisis" from 2015 onwards, this has fundamentally changed. Today, the AfD clearly belongs to the family of right-wing populist parties.
+
+```{r}
+#| label: fig-afd_loyal
+#| out-width: 100%
+#| fig-cap: "Workers and the AfD vote, 2013--2024"
+#| fig-subcap:
+#|   - "Loyalty: propensity of workers to vote for the AfD"
+#|   - "Gap between workers and non-workers in the AfD vote"
+#| layout-ncol: 2
+#| echo: false
+#| fig-pos: "H"
+
+knitr::include_graphics(here("figs", "loyalty_worker_afd.png"))
+knitr::include_graphics(here("figs", "class_gap_afd.png"))
+
+```
+Over time, workers' loyalty to the new party has increased to between 25 and 28 per cent. While this may seem low, many surveys have fewer respondents who say they would vote for the AfD than there are in reality. Consequently, most surveys underestimate the true proportion of voters who support the AfD. Nevertheless, there has been a substantial increase in workers' loyalty to the Alternative for Germany (AfD) party. At the same time, the difference in propensity to vote for the party between workers and non-workers has also increased considerably. While there was no difference between these groups in 2013, the figure has now risen to over 15 per cent.
+
+```{r}
+#| label: fig-afd_contrib
+#| out-width: 100%
+#| fig-cap: "Workers' share of the AfD vote, 2103--2024"
+#| fig-subcap:
+#|   - "Contribution: Share of workers of all AfD voters"
+#|   - "PCI: Gap between workers' and non-workers' contribution to the AfD"
+#| layout-ncol: 2
+#| echo: false
+#| fig-pos: "H"
+
+knitr::include_graphics(here("figs", "contrib_workers_afd.png"))
+knitr::include_graphics(here("figs", "pci_workers_afd.png"))
+
+```
+
+Again, loyalty is only one side of the coin. @fig-afd_contrib-1 shows how much workers contribute to the AfD vote. In 2013, workers made up just over a quarter of the AfD electorate. As the party has fully endorsed right-wing populism, this share rose steadily, to around 36 per cent in 2016 and to more than 40 per cent in 2019. Since then, it has fluctuated between roughly 37 and 42 per cent. In the latest year for which figures are available, about two out of five AfD voters are workers. This contrasts sharply with the Social Democrats. Today, the share of workers among AfD voters is considerably larger than among SPD voters, where it has fallen to around a quarter (see @fig-spd_contrib-1). At the same time, the AfD is not an exclusively working-class party. The majority of its voters still come from other classes, which is in line with the finding of @Oesch.2018 that about half of the radical right electorate is working class.
+
+The Party Cleavage Index in @fig-afd_contrib-2 shows the mirror image of the SPD trend. In 2013, the PCI was close to zero, and its credible interval includes zero. That means that workers were not over-represented among AfD voters compared with their share in society. By 2016, the share of workers among the AfD electorate exceeded the share of workers in society by about 10 percentage points. Since 2019, the gap has stood at 15 to 17 percentage points. Because the share of workers in society has not grown over this period, the rising contribution cannot be explained by group size. It reflects the growing loyalty of workers shown in @fig-afd_loyal-1.
+
+Taken together, these results show that the AfD has become a working-class party in both senses of the term. Workers are more likely than non-workers to vote for the party, and they are clearly over-represented in its electorate. While the PCI of the SPD has declined to zero, the PCI of the AfD has risen from zero to its current level, so that the two parties have almost swapped positions within a decade. Still, these changes in loyalty and contribution do not imply that the AfD has also adopted a working-class platform. It relies on a cross-class electoral coalition in which non-workers make up the majority. This may help explain why its positions on redistribution, taxation, and the welfare state cannot be described as economically left wing [@Biskamp.2026].
+
+@fig-afd_spd_comp in the Appendix compares workers' loyalty and contribution to the SPD and AfD in the years from 2013 to 2024. @fig-afd_spd_comp-1 illustrates that it is only in the final two years of the series that the loyalty of workers to the AfD has surpassed that to the SPD. By contrast, workers have contributed more to the AfD vote than to the SPD since at least 2015 (@fig-afd_spd_comp-2).
+
 \newpage
 
-## References
+# References
 
 ::: {#refs}
 
 :::
 
 \newpage 
-## Appendix 
+# Appendix {#sec-appendix}
 
+\scriptsize
+
+| Outcome       | Model | $\bar{\alpha}$  | $\bar{\beta}$ | $\gamma_k$ | $\sigma_\alpha$ | $\sigma_\beta$ | $\mathbf{R}$ |
+|:--------------|:------|:----------------|:--------------|:-----------|:----------------|:---------------|:-------------|
+| Radical right | M0    | N($-2$, 1)      | N(0, 1)       | ---        | ---             | ---            | ---          |
+|               | M1    | N($-2$, 1)      | N(0, 1)       | ---        | Exp(1)          | ---            | ---          |
+|               | M2    | N($-2$, 1)      | N(0, 1)       | ---        | Exp(1)          | Exp(1)         | LKJ(2)       |
+|               | M3    | N($-2.3$, 0.7)  | N(0, 0.5)     | N(0, 0.5)  | Exp(2)          | Exp(2)         | LKJ(2)       |
+| Socialist     | M0    | N($-1.1$, 0.6)  | N(0, 1)       | ---        | ---             | ---            | ---          |
+|               | M1    | N($-1.1$, 0.6)  | N(0, 1)       | ---        | Exp(1)          | ---            | ---          |
+|               | M2    | N($-1.1$, 0.6)  | N(0, 1)       | ---        | Exp(1)          | Exp(1)         | LKJ(2)       |
+|               | M3    | N($-0.4$, 0.4)  | N(0, 0.5)     | N(0, 0.5)  | Exp(2)          | Exp(2)         | LKJ(2)       |
+
+: Prior distributions for all models. $\bar{\alpha}$ = intercept (log-odds of voting for the party among non-workers; in M0 the single pooled intercept); $\bar{\beta}$ = worker coefficient; $\gamma_k$ = covariate coefficients; $\sigma_\alpha$, $\sigma_\beta$ = standard deviations of the country-specific intercepts and worker slopes; $\mathbf{R}$ = their correlation matrix. N($\mu$, $\sigma$) denotes a normal distribution with mean $\mu$ and standard deviation $\sigma$ on the logit scale; Exp($\lambda$) an exponential distribution with rate $\lambda$; LKJ($\eta$) the LKJ distribution for correlation matrices. M0 is a pooled model without country variation; M1 adds varying intercepts by country; M2 additionally varying worker slopes; M3 adds age group (30--65, above 65; reference 18--29), gender (reference men), marital status (never married; reference 'at one point') and migration background (reference non-immigrant). In M3, $\bar{\alpha}$ refers to the reference category. --- = parameter not included in the model. {#tbl-priors}
+
+
+```{r}
+#| label: fig-afd_spd_comp
+#| out-width: 100%
+#| fig-cap: "Class voting in Germany"
+#| fig-subcap:
+#|   - "Loyalty to SPD & AfD"
+#|   - "Contribution to SPD & AfD"
+#| layout-ncol: 2
+#| echo: false
+#| fig-pos: "H"
+
+knitr::include_graphics(here("figs", "scatter_loyalty_spd_afd.png"))
+knitr::include_graphics(here("figs", "scatter_contribution_spd_afd.png"))
+
+```
+
+```{r}
+#| label: tbl-pb-models
+#| tbl-cap: "Parameter estimates of the Politbarometer models."
+#| echo: false
+
+readRDS(here("tables", "pb_model_parameters.rds")) |>
+  rename(" " = term) |>
+  tt(notes = "Posterior medians with 95% credible intervals on the logit scale. In the loyalty models, the slope is the worker coefficient; in the contribution models, it is the coefficient for voting for the party. Varying intercepts and slopes by survey year. AfD models: 2013--2024; SPD models: 1977--2024.") |>
+  style_tt(i = 5, line = "b")
+```
+
+```{r}
+#| label: tbl-pb-years-afd
+#| tbl-cap: "Workers and the AfD vote by year, 2013--2024."
+#| echo: false
+
+readRDS(here("tables", "pb_years_afd.rds")) |>
+  tt(notes = "Posterior medians with 95% credible intervals. Loyalty: Pr(AfD | worker); ICV: Pr(AfD | worker) - Pr(AfD | non-worker); Contribution: Pr(worker | AfD); PCI: contribution minus the share of workers.")
+```
+
+```{r}
+#| label: tbl-pb-years-spd
+#| tbl-cap: "Workers and the SPD vote by year, 1977--2024."
+#| echo: false
+
+readRDS(here("tables", "pb_years_spd.rds")) |>
+  tt(notes = "Posterior medians with 95% credible intervals. Loyalty: Pr(SPD | worker); ICV: Pr(SPD | worker) - Pr(SPD | non-worker); Contribution: Pr(worker | SPD); PCI: contribution minus the share of workers.")
+```
+
+\normalsize

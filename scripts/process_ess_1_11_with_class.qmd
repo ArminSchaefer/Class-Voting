@@ -1,0 +1,1382 @@
+---
+title: "ESS_EduXGenXGend_Recode"
+author: "Research Assistant Lars Hinkel"
+date: "`r Sys.Date()`"
+output: 
+  html_document: 
+    df_print: paged
+editor: 
+  markdown: 
+    wrap: sentence
+---
+
+# Load packages using Packman and pload
+
+```{r setup, include=FALSE}
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse, haven, here, labelled, dplyr, readr, rio, forcats, tidyr)
+```
+
+# Load and preprocess data from ESS-Data-Wizard
+
+```{r}
+
+ess_filtered     <- import(here("data", "raw", "ESS_rounds_1-11.csv"), trust = TRUE)
+
+ess_class_scheme <- import(here("data", "processed", "ess_class_scheme.rds"), trust = TRUE)
+
+ess_filtered <- merge(ess_filtered, ess_class_scheme, by = c("essround", "idno"))
+
+
+```
+
+# Data preparation
+
+## Filtering and generating macro IDs
+
+```{r}
+# Data preparation
+# Filter: Only Western European countries included in ESS rounds 1-11
+#ess_filtered <- ess |>
+#  filter(cntry %in% c("BE", "CH", "DE", "ES", "FI", "FR", "GB", "IE", "NL", "NO", "PT", "SE"))
+
+# Generate macro IDs
+ess_filtered <- ess_filtered |>
+  mutate(
+    cntry_id = as.numeric(as.factor(cntry)),
+    cntry_wave_id = as.numeric(as.factor(paste(cntry, essround, sep = "_")))
+  )
+
+# Sort data by `cntry` and `essround` before generating IDs
+ess_filtered <- ess_filtered |>
+  arrange(cntry, essround) |>
+  mutate(
+    cntry_id = as.numeric(factor(cntry, levels = unique(cntry))), # Takes data order into account
+    cntry_wave_id = as.numeric(factor(paste(cntry, essround, sep = "_"), 
+                                      levels = unique(paste(cntry, essround, sep = "_"))))
+    )
+```
+
+## Year of the ESS round
+
+```{r}
+ess_filtered <- ess_filtered |>
+  mutate(year = case_when(
+    essround == 1 ~ 2002,
+    essround == 2 ~ 2004,
+    essround == 3 ~ 2006,
+    essround == 4 ~ 2008,
+    essround == 5 ~ 2010,
+    essround == 6 ~ 2012,
+    essround == 7 ~ 2014,
+    essround == 8 ~ 2016,
+    essround == 9 ~ 2018,
+    essround == 10 ~ 2020,
+    essround == 11 ~ 2023
+  ))
+```
+
+## Left-right scale and "Don't know" dummy
+
+```{r}
+ess_filtered <- ess_filtered |>
+  mutate(
+    # Convert lrscale to numeric
+    lrscale_numeric = as.numeric(lrscale),
+    # Recode the left-right scale (NA for 77, 88, 99)
+    leftright = case_when(
+      lrscale_numeric %in% c(77, 88, 99) ~ NA_real_,
+      TRUE ~ -lrscale_numeric + 10
+    ),
+    # "Don't know" dummy (NA for 77 and 99)
+    lrscale_dontknow = case_when(
+      lrscale == 88 ~ 1,
+      lrscale %in% c(77, 99) ~ NA_real_,
+      TRUE ~ 0
+    )
+  )
+```
+
+## Recode issue items
+
+```{r}
+ess_filtered <- ess_filtered |>
+  mutate(
+    # Redistribution
+    redistribution = case_when(
+      gincdif == 5 ~ 0,
+      gincdif == 4 ~ 1,
+      gincdif == 3 ~ 2,
+      gincdif == 2 ~ 3,
+      gincdif == 1 ~ 4,
+      gincdif %in% c(7, 8, 9) ~ NA_real_
+    ),
+    
+    # Homosexuals
+    homosexuals = case_when(
+      freehms == 5 ~ 0,
+      freehms == 4 ~ 1,
+      freehms == 3 ~ 2,
+      freehms == 2 ~ 3,
+      freehms == 1 ~ 4,
+      freehms %in% c(7, 8, 9) ~ NA_real_
+    ),
+    
+    # Environment
+    environment = case_when(
+      impenv == 6 ~ 0, # "not like me at all"
+      impenv == 5 ~ 1,
+      impenv == 4 ~ 2,
+      impenv == 3 ~ 3,
+      impenv == 2 ~ 4,
+      impenv == 1 ~ 5, # "very much like me"
+      impenv %in% c(7, 8, 9) ~ NA_real_
+    ),
+    
+    # Immigration (reversed)
+    immigration = case_when(
+      impcntr == 4 ~ 0, # Allow none
+      impcntr == 3 ~ 1, # Allow a few
+      impcntr == 2 ~ 2, # Allow some
+      impcntr == 1 ~ 3, # Allow many
+      impcntr %in% c(7, 8, 9) ~ NA_real_ # Missing Values
+    )
+  )
+
+# Prepare data for factor analysis
+immigration_items <- ess_filtered |>
+  mutate(
+    imsmetn = ifelse(imsmetn %in% c(7, 8, 9), NA_real_, imsmetn),
+    imdfetn = ifelse(imdfetn %in% c(7, 8, 9), NA_real_, imdfetn),
+    imueclt = ifelse(imueclt %in% c(77, 88, 99), NA_real_, imueclt),
+    imbgeco = ifelse(imbgeco %in% c(77, 88, 99), NA_real_, imbgeco),
+    imwbcnt = ifelse(imwbcnt %in% c(77, 88, 99), NA_real_, imwbcnt)
+  ) |>
+  select(imsmetn, imdfetn, immigration, imueclt, imbgeco, imwbcnt)
+
+# Check the distribution of missing values (optional)
+sapply(immigration_items, function(x) sum(is.na(x)))
+
+# Use only complete cases
+valid_rows <- complete.cases(immigration_items)
+
+# Factor analysis
+factor_res <- factanal(immigration_items[valid_rows, ], factors = 1, scores = "regression")
+
+# Extract and reverse factor scores
+ess_filtered <- ess_filtered |>
+  mutate(
+    immigration_fact = ifelse(row_number() %in% which(valid_rows), -factor_res$scores[, 1], NA),
+    immigration_fact_std = ifelse(
+      !is.na(immigration_fact),
+      round((immigration_fact - min(immigration_fact, na.rm = TRUE)) /
+        (max(immigration_fact, na.rm = TRUE) - min(immigration_fact, na.rm = TRUE)), 6),
+      NA
+    )
+  )
+
+# Standardize other variables
+ess_filtered <- ess_filtered |>
+  mutate(
+    redistribution_std = round(redistribution / 4, 6),
+    homosexuals_std = round(homosexuals / 4, 6),
+    environment_std = round(environment / 5, 6),
+    immigration_std = round(immigration / 3, 6) # Verwende umgekehrte `immigration`
+  )
+```
+
+## Define cohorts: Mitteregger (2024)
+
+```{r}
+# Define cohorts with missing value handling
+ess_filtered <- ess_filtered |>
+  mutate(
+    yrbrn_clean = ifelse(yrbrn %in% c(6666, 7777, 8888, 9999), NA, yrbrn),
+    cohort = case_when(
+      yrbrn_clean <= 1925 ~ 0,
+      yrbrn_clean >= 1926 & yrbrn_clean <= 1945 ~ 1,
+      yrbrn_clean >= 1946 & yrbrn_clean <= 1957 ~ 2,
+      yrbrn_clean >= 1958 & yrbrn_clean <= 1968 ~ 3,
+      yrbrn_clean >= 1969 & yrbrn_clean <= 1979 ~ 4,
+      yrbrn_clean >= 1980 ~ 5,
+      TRUE ~ NA_real_ # Ensure unexpected values are NA
+    )
+  )
+
+# Define cohort labels
+cohort_labels <- c("interwar", "post-war", "60-70s", "80s", "90s", "millennial")
+
+# Assign labels to cohorts
+ess_filtered <- ess_filtered |>
+  mutate(cohort = labelled(cohort, labels = setNames(0:5, cohort_labels)))
+```
+
+## Define cohorts: Decade of Birth
+
+```{r}
+ess_filtered <- ess_filtered |>
+  mutate(
+    yrbrn_clean = ifelse(yrbrn %in% c(6666, 7777, 8888, 9999), NA, yrbrn),
+    cohort_alt = case_when(
+      yrbrn_clean <= 1929 ~ 0,
+      yrbrn_clean >= 1930 & yrbrn_clean <= 1939 ~ 1,
+      yrbrn_clean >= 1940 & yrbrn_clean <= 1949 ~ 2,
+      yrbrn_clean >= 1950 & yrbrn_clean <= 1959 ~ 3,
+      yrbrn_clean >= 1960 & yrbrn_clean <= 1969 ~ 4,
+      yrbrn_clean >= 1970 & yrbrn_clean <= 1979 ~ 5,
+      yrbrn_clean >= 1980 & yrbrn_clean <= 1989 ~ 6,
+      yrbrn_clean >= 1990 ~ 7,
+      TRUE ~ NA_real_ # Ensure unexpected values are NA
+    )
+  )
+
+# Define cohort labels
+cohort_alt_labels <- c("-1929", "1930s", "1940s", "1950s", "1960s", "1970s", "1980s", "1990-")
+
+# Assign labels to cohorts
+ess_filtered <- ess_filtered |>
+  mutate(cohort_alt = labelled(cohort_alt, labels = setNames(0:7, cohort_alt_labels)))
+```
+
+## Age groups
+
+```{r}
+ess_filtered <- ess_filtered |>
+  mutate(
+     # Clean age variable by removing all missing values
+    agea_clean = ifelse(agea %in% c(999, 6666, 7777, 8888), NA_real_, agea),
+    # Create age groups
+    age_group = case_when(
+      agea_clean > 17 & agea_clean <= 29 ~ 1,
+      agea_clean >= 30 & agea_clean <= 65 ~ 2,
+      agea_clean >= 66 ~ 3,
+      TRUE ~ NA_real_ # Ensure unexpected values are NA
+    )
+  )
+
+# Assign labels to age groups
+age_group_labels <- c("18-29", "30-65", "66+")
+ess_filtered <- ess_filtered |>
+  mutate(age_group = labelled(age_group, labels = setNames(0:3, age_group_labels)))
+```
+
+## Recode education
+
+```{r}
+ess_filtered <- ess_filtered |>
+  mutate(
+    # Clean edulvla from missing values
+    edulvla_clean = ifelse(edulvla %in% c(77, 88, 99), NA_real_, edulvla),
+    # Clean edulvlb from missing values
+    edulvlb_clean = ifelse(edulvlb %in% c(7777, 8888, 9999), NA_real_, edulvlb),
+    
+    # Recoding edulvla
+    education_a = recode(edulvla_clean, 
+                         `1` = 0,  # Low education
+                         `2` = 0,  # Low education
+                         `3` = 1,  # Medium education
+                         `4` = 1,  # Medium education
+                         `5` = 2,  # High education
+                         `55` = NA_real_),  # Other
+    
+    # Recoding edulvlb
+    education_b = case_when(
+      edulvlb_clean >= 0 & edulvlb_clean <= 229 ~ 0,  # Low education
+      edulvlb_clean >= 300 & edulvlb_clean <= 423 ~ 1,  # Medium education
+      edulvlb_clean >= 500 & edulvlb_clean <= 800 ~ 2,  # High education
+      edulvlb_clean == 5555 ~ NA_real_,  # Other
+      TRUE ~ NA_real_  # Fallback
+    ),
+    
+    # Combined education variable
+    education = ifelse(is.na(education_a), education_b, education_a),
+    edulowhigh = case_match(eisced,
+                            c(0:4)~"low",
+                            c(5:7)~"high")
+  )
+```
+
+## Immigration background
+
+```{r}
+ess_filtered <- ess_filtered |>
+  mutate(
+    # Clean variables from missing values
+    brncntr_clean = ifelse(brncntr %in% c(7, 8, 9), NA_real_, brncntr),
+    facntr_clean = ifelse(facntr %in% c(7, 8, 9), NA_real_, facntr),
+    mocntr_clean = ifelse(mocntr %in% c(7, 8, 9), NA_real_, mocntr),
+    
+    # Calculate immigration background
+    immigrant = case_when(
+      brncntr_clean == 1 & facntr_clean == 1 & mocntr_clean == 1 ~ 0, # No immigration background
+      brncntr_clean == 2 | facntr_clean == 2 | mocntr_clean == 2 ~ 1, # Immigration background
+      TRUE ~ NA_real_ # Ensure unexpected cases are set to NA
+    )
+  )
+```
+
+## Recode voting decision and country-specific recodes
+
+```{r}
+# Recode voting decision
+ess_filtered <- ess_filtered |>
+  mutate(voted = NA_integer_) # Initialize variable
+
+# Define labels
+voted_labels <- c(
+  "Abstention", "Communist/Socialist", "Social democracy", "Green",
+  "Liberal", "Conservative/Christian democracy", "Radical Right",
+  "Agrarian", "Special issue", "Other", "Blank / Invalid",
+  "Not eligible to vote"
+)
+voted <- labelled(NA_integer_, labels = setNames(0:11, voted_labels))
+
+# Recode based on the "vote" variable
+ess_filtered <- ess_filtered |>
+  mutate(
+    voted = case_when(
+      vote == 2 ~ 0,  # Abstention
+      vote == 3 ~ 11, # Not eligible to vote
+      TRUE ~ voted    # Keep original value
+    )
+  )
+
+# Country-specific recodes
+# Belgium
+ess_filtered <- ess_filtered |>
+  mutate(
+    voted = case_when(
+      # Communist/Socialist
+      prtvtbe %in% c(7, 16) | 
+        prtvtcbe %in% c(6, 14) | 
+        prtvtdbe %in% c(6, 14) | 
+        prtvtebe %in% c(5, 12) ~ 1, 
+      
+      # Social democracy
+      prtvtbe %in% c(3, 14) | 
+        prtvtabe %in% c(5, 13) | 
+        prtvtbbe %in% c(5, 13) | 
+        prtvtcbe %in% c(5, 13) | 
+        prtvtdbe %in% c(5, 13) | 
+        prtvtebe %in% c(4, 11) ~ 2, 
+      
+      # Green
+      prtvtbe %in% c(1, 11) | 
+        prtvtabe %in% c(1, 10) | 
+        prtvtbbe %in% c(1, 10) | 
+        prtvtcbe %in% c(1, 10) | 
+        prtvtdbe %in% c(1, 10) | 
+        prtvtebe %in% c(1, 9) ~ 3, 
+      
+      # Liberal
+      prtvtbe %in% c(5, 9, 13) | 
+        prtvtabe %in% c(6, 8, 12) | 
+        prtvtbbe %in% c(4, 8, 12) | 
+        prtvtcbe %in% c(4, 8, 12) | 
+        prtvtdbe %in% c(4, 8, 12, 16) | 
+        prtvtebe %in% c(10, 7, 13) ~ 4, 
+      
+      # Conservative/Christian democracy
+      prtvtbe %in% c(2, 12) | 
+        prtvtabe %in% c(2, 3, 9) | 
+        prtvtbbe %in% c(2, 9) | 
+        prtvtcbe %in% c(2, 3, 9, 15) | 
+        prtvtdbe %in% c(2, 3, 9, 15) | 
+        prtvtebe %in% c(2, 3, 8) ~ 5, 
+      
+      # Radical Right
+      prtvtbe %in% c(6, 8, 15) | 
+        prtvtabe %in% c(7, 11) | 
+        prtvtbbe %in% c(7, 11) | 
+        prtvtcbe %in% c(7, 11) | 
+        prtvtdbe %in% c(7, 11) | 
+        prtvtebe %in% c(6) ~ 6, 
+      
+      # Other
+      prtvtbe %in% c(17) | 
+        prtvtabe %in% c(14) | 
+        prtvtbbe %in% c(14) | 
+        prtvtcbe %in% c(16) ~ 9, 
+      
+      # Blank / Invalid
+      prtvtabe %in% c(15, 16) | 
+        prtvtbbe %in% c(15, 16) | 
+        prtvtcbe %in% c(17, 18) |
+        prtvtebe %in% c(14, 15) ~ 10,
+      
+      # Fallback: Keep existing values
+      TRUE ~ voted
+    )
+  )
+
+# Switzerland: Recode with additional waves 8, 9, and 10
+ess_filtered <- ess_filtered |>
+  mutate(
+    voted = case_when(
+      # Communist/Socialist
+      prtvtbch %in% c(7) | 
+        prtvtach %in% c(9) | 
+        prtvtch %in% c(9) | 
+        prtvtcch %in% c(7) | 
+        prtvtdch %in% c(11, 14) | 
+        prtvtech %in% c(11, 14) | 
+        prtvtfch %in% c(11) | 
+        prtvthch %in% c(11) ~ 1, 
+      
+      # Social democracy
+      prtvtch %in% c(3, 6) | 
+        prtvtach %in% c(3) | 
+        prtvtbch %in% c(3) | 
+        prtvtcch %in% c(3) | 
+        prtvtdch %in% c(2) | 
+        prtvtech %in% c(2) | 
+        prtvtfch %in% c(2) | 
+        prtvtgch %in% c(2) | 
+        prtvthch %in% c(2) ~ 2, 
+      
+      # Green
+      prtvtch %in% c(10, 14) | 
+        prtvtach %in% c(10, 14) | 
+        prtvtbch %in% c(8, 9) | 
+        prtvtcch %in% c(8, 9) | 
+        prtvtdch %in% c(5, 6) | 
+        prtvtech %in% c(5, 6, 15) | 
+        prtvtfch %in% c(5, 6) | 
+        prtvtgch %in% c(5, 6, 13) | 
+        prtvthch %in% c(4, 6, 12) ~ 3, 
+      
+      # Liberal
+      prtvtch %in% c(1, 5) | 
+        prtvtach %in% c(1, 5) | 
+        prtvtbch %in% c(1, 5) | 
+        prtvtcch %in% c(1, 5) | 
+        prtvtdch %in% c(3, 16) | 
+        prtvtech %in% c(3) | 
+        prtvtfch %in% c(3) | 
+        prtvtgch %in% c(3) | 
+        prtvthch %in% c(3) ~ 4, 
+      
+      # Conservative/Christian democracy
+      prtvtch %in% c(2, 7, 8, 12) | 
+        prtvtach %in% c(2, 7, 8, 12) | 
+        prtvtbch %in% c(2, 6, 11, 12) | 
+        prtvtcch %in% c(2, 6, 11, 12) | 
+        prtvtdch %in% c(4, 7, 8, 9, 13) | 
+        prtvtech %in% c(4, 7, 8, 9, 13) | 
+        prtvtfch %in% c(4, 7, 8, 9) | 
+        prtvtgch %in% c(4, 7, 8, 9) | 
+        prtvthch %in% c(5, 7, 8, 9, 13) ~ 5, 
+      
+      # Radical Right
+      prtvtch %in% c(4, 11, 13, 15) | 
+        prtvtach %in% c(4, 11, 13, 15) | 
+        prtvtbch %in% c(4, 10, 13) | 
+        prtvtcch %in% c(4, 10, 13) | 
+        prtvtdch %in% c(1, 10, 12, 15, 17) | 
+        prtvtech %in% c(1, 10, 12) | 
+        prtvtfch %in% c(10, 1) | 
+        prtvtgch %in% c(10, 1) | 
+        prtvthch %in% c(10, 1, 15) ~ 6, 
+      
+      # Other
+      prtvtch %in% c(16) | 
+        prtvtach %in% c(16) | 
+        prtvtbch %in% c(14) | 
+        prtvtcch %in% c(20) | 
+        prtvtech %in% c(18) | 
+        prtvtfch %in% c(16, 18) | 
+        prtvtgch %in% c(15) | 
+        prtvthch %in% c(17) ~ 9, 
+      
+      # Blank / Invalid
+      prtvtbch %in% c(15, 16) | 
+        prtvtcch %in% c(18, 19) | 
+        prtvtdch %in% c(19, 20) | 
+        prtvtech %in% c(19, 20) | 
+        prtvtfch %in% c(19, 55) | 
+        prtvtgch %in% c(16) | 
+        prtvthch %in% c(18, 20) ~ 10, 
+      
+      # Fallback: Keep existing values
+      TRUE ~ voted
+    )
+  )
+
+# Germany: Recode including new variable prtvgde2 (Wave 11)
+ess_filtered <- ess_filtered |>
+  mutate(
+    voted = case_when(
+      # Party of Democratic Socialism (PDS)
+        prtvde2  %in% c(5) |
+        prtvade2 %in% c(5) |
+        prtvbde2 %in% c(5) | 
+        prtvcde2 %in% c(5) | 
+        prtvdde2 %in% c(5) | 
+        prtvede2 %in% c(3) | 
+        prtvfde2 %in% c(3) | 
+        prtvgde2 %in% c(3) ~ 1, 
+      
+      # Social Democratic Party (SPD)
+      prtvde2 %in% c(1) |
+        prtvade2 %in% c(1) |
+        prtvbde2 %in% c(1) | 
+        prtvcde2 %in% c(1) |
+        prtvdde2 %in% c(1) |
+        prtvede2 %in% c(2) | 
+        prtvfde2 %in% c(2) | 
+        prtvgde2 %in% c(2) ~ 2, 
+      
+      # Alliance 90/The Greens
+      prtvde2 %in% c(3) |
+        prtvade2 %in% c(3) |
+        prtvbde2 %in% c(3) | 
+        prtvcde2 %in% c(3) |
+        prtvdde2 %in% c(3) |
+        prtvede2 %in% c(4) | 
+        prtvfde2 %in% c(4) | 
+        prtvgde2 %in% c(4) ~ 3, 
+      
+      # Free Democratic Party (FDP)
+      prtvde2 %in% c(4) |
+        prtvade2 %in% c(4) |
+        prtvbde2 %in% c(4) | 
+        prtvcde2 %in% c(4) |
+        prtvdde2 %in% c(4, 8) |
+        prtvede2 %in% c(5, 7) | 
+        prtvfde2 %in% c(5) | 
+        prtvgde2 %in% c(5) ~ 4, 
+      
+      # Christian Democratic Union/Christian Social Union (CDU/CSU)
+      prtvde2 %in% c(2) |
+        prtvade2 %in% c(2) |
+        prtvbde2 %in% c(2) | 
+        prtvcde2 %in% c(2) |
+        prtvdde2 %in% c(2) |
+        prtvede2 %in% c(1) | 
+        prtvfde2 %in% c(1) | 
+        prtvgde2 %in% c(1, 7) ~ 5, # Freie Wähler/Free Voters (7) 
+      
+      # The Republicans (REP)
+      prtvde2 %in% c(6) |
+        prtvade2 %in% c(6, 7) |
+        prtvbde2 %in% c(6, 7) | 
+        prtvcde2 %in% c(6, 7) |
+        prtvdde2 %in% c(6, 7) |
+        prtvede2 %in% c(6, 8) | 
+        prtvfde2 %in% c(6) | 
+        prtvgde2 %in% c(6) ~ 6, # AfD (6)
+      
+      # Other
+      prtvde2 %in% c(7) |
+        prtvade2 %in% c(8) |
+        prtvbde2 %in% c(8) | 
+        prtvcde2 %in% c(8) |
+        prtvdde2 %in% c(9) |
+        prtvede2 %in% c(9) | 
+        prtvfde2 %in% c(7) | 
+        prtvgde2 %in% c(8, 9, 55) ~ 9,  # dieBasis (8), Die PARTEI (9), Other (55) 
+      
+      # Fallback: Keep existing values
+      TRUE ~ voted
+    )
+  )
+
+# Norway: Recode including new variable prtvtcno (Wave 11)
+ess_filtered <- ess_filtered |>
+  mutate(
+    voted = case_when(
+      # Rødt / Sosialistisk Venstreparti (SV)
+      prtvtno %in% c(1, 2) | 
+        prtvtano %in% c(1, 2) | 
+        prtvtbno %in% c(1, 2) | 
+        prtvtcno %in% c(1, 2) ~ 1,  # Rødt (1), SV (2)
+      
+      # Det norske Arbeiderparti (Labour Party)
+      prtvtno %in% c(3) | 
+        prtvtano %in% c(3) | 
+        prtvtbno %in% c(3) | 
+        prtvtcno %in% c(3) ~ 2,  # Arbeiderpartiet (3)
+      
+      # Miljøpartiet De Grønne (Green Party)
+      prtvtbno %in% c(10) | 
+        prtvtcno %in% c(9) ~ 3,  # MDG (9)
+      
+      # Venstre (Liberal Party)
+      prtvtno %in% c(4) | 
+        prtvtano %in% c(4) | 
+        prtvtbno %in% c(4) | 
+        prtvtcno %in% c(4) ~ 4,  # Venstre (4)
+      
+      # Kristelig Folkeparti (KrF) / Høyre (Conservatives)
+      prtvtno %in% c(5, 7, 9) | 
+        prtvtano %in% c(5, 7, 9) | 
+        prtvtbno %in% c(5, 7) | 
+        prtvtcno %in% c(5, 7) ~ 5,  # KrF (5), Høyre (7)
+      
+      # Fremskrittspartiet (Progress Party)
+      prtvtno %in% c(8) | 
+        prtvtano %in% c(8) | 
+        prtvtbno %in% c(8) | 
+        prtvtcno %in% c(8) ~ 6,  # Fremskrittspartiet (8)
+      
+      # Senterpartiet (Centre Party)
+      prtvtno %in% c(6) | 
+        prtvtano %in% c(6) | 
+        prtvtbno %in% c(6, 9) | 
+        prtvtcno %in% c(6) ~ 7,  # Senterpartiet (6)
+      
+      # Other (inkl. Pasientfokus)
+      prtvtno %in% c(10) | 
+        prtvtano %in% c(10) | 
+        prtvtbno %in% c(11) | 
+        prtvtcno %in% c(10, 11) ~ 9,  # Pasientfokus (10), Other (11)
+      
+      # Fallback: Keep existing values
+      TRUE ~ voted
+    )
+  )
+
+
+# United Kingdom
+ess_filtered <- ess_filtered |>
+  mutate(
+    voted = case_when(
+      # Sinn Féin (nir)
+      prtvtgb %in% c(13) |
+        prtvtagb %in% c(13) |
+        prtvtbgb %in% c(11) | 
+        prtvtcgb %in% c(11) |
+        prtvtdgb %in% c(12) ~ 1,
+      
+      # Labour / Scottish National Party / Social Democratic and Labour Party (nir)
+      prtvtgb %in% c(2, 4, 14) |
+        prtvtagb %in% c(2, 4, 14) |
+        prtvtbgb %in% c(2, 4, 12) | 
+        prtvtcgb %in% c(2, 4, 12) |
+        prtvtdgb %in% c(2, 4) ~ 2,
+      
+      # Green Party
+      prtvtgb %in% c(6) |
+        prtvtagb %in% c(6) |
+        prtvtbgb %in% c(6) | 
+        prtvtcgb %in% c(6, 15) |
+        prtvtdgb %in% c(6, 15) ~ 3,
+      
+      # Liberal Democrat / Alliance Party (nir)
+      prtvtgb %in% c(3, 15) |
+        prtvtagb %in% c(3, 15) |
+        prtvtbgb %in% c(3, 13) | 
+        prtvtcgb %in% c(3, 13) |
+        prtvtdgb %in% c(3) ~ 4,
+      
+      # Conservative / Ulster Unionist Party / Democratic Unionist Party (nir)
+      prtvtgb %in% c(1, 11, 12, 17) |
+        prtvtagb %in% c(1, 11, 12) |
+        prtvtbgb %in% c(1, 9, 10) | 
+        prtvtcgb %in% c(1, 9, 10) |
+        prtvtdgb %in% c(1, 10, 11) ~ 5,
+      
+      # British National Party / UK Independence Party / Brexit Party
+      prtvtagb %in% c(7, 8) |
+        prtvtbgb %in% c(7) |
+        prtvtcgb %in% c(7) | 
+        prtvtdgb %in% c(7, 8) ~ 6,
+      
+      # Plaid Cymru
+      prtvtgb %in% c(5) |
+        prtvtagb %in% c(5) |
+        prtvtbgb %in% c(5) | 
+        prtvtcgb %in% c(5) |
+        prtvtdgb %in% c(5) ~ 8,
+      
+      # Other
+      prtvtgb %in% c(7, 18, 22) |
+        prtvtagb %in% c(22) |
+        prtvtbgb %in% c(8, 14, 16, 18) |
+        prtvtcgb %in% c(16, 19) |
+        prtvtdgb %in% c(9, 23) ~ 9,
+      
+       # Fallback: Keep existing values
+      TRUE ~ voted
+    )
+  )
+
+# Sweden
+ess_filtered <- ess_filtered |>
+  mutate(
+    voted = case_when(
+      # Left
+      prtvtse %in% c(7) |
+        prtvtase %in% c(7) |
+        prtvtbse %in% c(7) | 
+        prtvtcse %in% c(7) |
+        prtvtdse %in% c(8) ~ 1,
+      
+      # Social Democrats
+      prtvtse %in% c(6) |
+        prtvtase %in% c(6) |
+        prtvtbse %in% c(6) | 
+        prtvtcse %in% c(6) |
+        prtvtdse %in% c(6) ~ 2,
+      
+      # Green Party
+      prtvtse %in% c(4) |
+        prtvtase %in% c(4) |
+        prtvtbse %in% c(4) | 
+        prtvtcse %in% c(4) |
+        prtvtdse %in% c(4) ~ 3,
+      
+      # Liberals
+      prtvtse %in% c(2) |
+        prtvtase %in% c(2) |
+        prtvtbse %in% c(2) | 
+        prtvtcse %in% c(2) |
+        prtvtdse %in% c(3) ~ 4,
+      
+      # Christian Democrats / Conservative
+      prtvtse %in% c(3, 5) |
+        prtvtase %in% c(3, 5, 9) |
+        prtvtbse %in% c(3, 5) | 
+        prtvtcse %in% c(3, 5) |
+        prtvtdse %in% c(2, 5) ~ 5,
+      
+      # Sverigedemokraterna
+      prtvtase %in% c(10) |
+        prtvtbse %in% c(10) | 
+        prtvtcse %in% c(9) |
+        prtvtdse %in% c(7) ~ 6,
+      
+      # Centre Party
+      prtvtse %in% c(1) |
+        prtvtase %in% c(1) |
+        prtvtbse %in% c(1) | 
+        prtvtcse %in% c(1) |
+        prtvtdse %in% c(1) ~ 7,
+      
+      # FI (Feministiskt initiativ) / Piratpartiet
+      prtvtase %in% c(8) |
+        prtvtbse %in% c(8, 9) | 
+        prtvtcse %in% c(8) ~ 8,
+      
+      # Other
+      prtvtse %in% c(8) |
+        prtvtase %in% c(11) |
+        prtvtbse %in% c(11) | 
+        prtvtcse %in% c(10) |
+        prtvtdse %in% c(9) ~ 9,
+      
+      # Fallback: Keep existing values
+      TRUE ~ voted
+    )
+  )
+
+# France: Recode including new variable prtvtffr (Wave 11)
+ess_filtered <- ess_filtered |>
+  mutate(
+    voted = case_when(
+      # Lutte Ouvrière (LO) / Nouveau Parti Anti-Capitaliste (NPA) / Parti Communiste / NUPES
+      prtvtfr %in% c(4, 5, 6, 9) |
+        prtvtafr %in% c(4, 5, 6, 9) |
+        prtvtbfr %in% c(3, 4, 7, 14) |
+        prtvtcfr %in% c(4, 5, 6) | 
+        prtvtdfr %in% c(1, 2, 3, 4) |
+        prtvtefr %in% c(1, 2, 3, 4) |
+        prtvtffr %in% c(1, 2, 3) ~ 1,  # LO (1), NPA (2), NUPES (3) -> coded as Communist/Socialist because of LFI being the largest party, but: ATTENTION, also includes parties of social-democratic and green party family (better exclude France ESS wave 11 when analyzing voting for any of the three involved parties)
+      
+      # Parti Socialiste (PS)
+      prtvtfr %in% c(10) |
+        prtvtafr %in% c(10) | 
+        prtvtbfr %in% c(8, 9) |
+        prtvtcfr %in% c(7, 9) | 
+        prtvtdfr %in% c(5) |
+        prtvtefr %in% c(5) ~ 2,  
+      
+      # Les Verts / EELV
+      prtvtfr %in% c(14, 15) |
+        prtvtafr %in% c(14, 15) | 
+        prtvtbfr %in% c(12, 13) |
+        prtvtcfr %in% c(12, 13) | 
+        prtvtdfr %in% c(6) |
+        prtvtefr %in% c(6) ~ 3,
+      
+      # Ensemble! (LREM, MODEM, Horizons) (ehemals LREM)
+      prtvtbfr %in% c(6) |
+        prtvtcfr %in% c(1) | 
+        prtvtdfr %in% c(7) |
+        prtvtefr %in% c(7) |
+        prtvtffr %in% c(5) ~ 4,  # Ensemble! (5)
+      
+      # Les Républicains, UDI, Debout la France
+      prtvtfr %in% c(2, 8, 11, 12, 13, 1) |
+        prtvtafr %in% c(2, 8, 11, 12, 13, 1) | 
+        prtvtbfr %in% c(1, 5, 10, 11) |
+        prtvtcfr %in% c(3, 8, 10, 11) | 
+        prtvtdfr %in% c(8, 9, 10) |
+        prtvtefr %in% c(8, 9, 10) |
+        prtvtffr %in% c(6, 7) ~ 5,  # Les Républicains & UDI (6), Union pour la France (7)
+      
+      # Rassemblement National (ex-Front National) / Reconquête!
+      prtvtfr %in% c(3, 7) |
+        prtvtafr %in% c(3, 7) | 
+        prtvtbfr %in% c(2, 15) |
+        prtvtcfr %in% c(2) | 
+        prtvtdfr %in% c(11) |
+        prtvtefr %in% c(11) |
+        prtvtffr %in% c(8, 9) ~ 6,  # Rassemblement National (8), Reconquête! (9)
+      
+      # Other
+      prtvtfr %in% c(16) |
+        prtvtafr %in% c(16) | 
+        prtvtbfr %in% c(16) |
+        prtvtcfr %in% c(14) | 
+        prtvtdfr %in% c(12) |
+        prtvtefr %in% c(12) |
+        prtvtffr %in% c(31) ~ 9,  # Other (31)
+      
+      # Blank, Nul
+      prtvtafr %in% c(17) |
+        prtvtbfr %in% c(17, 18) | 
+        prtvtcfr %in% c(15, 16) |
+        prtvtffr %in% c(10, 11) ~ 10,  # Blanc (10), Nul (11)
+      
+      # Fallback: Keep existing values
+      TRUE ~ voted
+    )
+  )
+
+
+# Netherlands: Recode including new variable prtvtinl (Wave 11)
+ess_filtered <- ess_filtered |>
+  mutate(
+    voted = case_when(
+      # Socialist Party
+      prtvtnl %in% c(7) |
+        prtvtanl %in% c(7) |
+        prtvtbnl %in% c(7) | 
+        prtvtcnl %in% c(7) |
+        prtvtdnl %in% c(5) |
+        prtvtenl %in% c(5) | 
+        prtvtfnl %in% c(4) |
+        prtvtgnl %in% c(4) |
+        prtvthnl %in% c(4) |
+        prtvtinl %in% c(4) ~ 1,  # Socialist Party (4)
+      
+      # Labour Party (PvdA)
+      prtvtnl %in% c(2) |
+        prtvtanl %in% c(2) |
+        prtvtbnl %in% c(2) | 
+        prtvtcnl %in% c(2) |
+        prtvtdnl %in% c(2) |
+        prtvtenl %in% c(2) | 
+        prtvtfnl %in% c(2) |
+        prtvtgnl %in% c(2) |
+        prtvthnl %in% c(2) |
+        prtvtinl %in% c(2) ~ 2,  # Labour Party (2)
+      
+      # Green Left (GroenLinks)
+      prtvtnl %in% c(6) |
+        prtvtanl %in% c(6) |
+        prtvtbnl %in% c(6) | 
+        prtvtcnl %in% c(6) |
+        prtvtdnl %in% c(7) |
+        prtvtenl %in% c(7) | 
+        prtvtfnl %in% c(8) |
+        prtvtgnl %in% c(8) |
+        prtvthnl %in% c(8) |
+        prtvtinl %in% c(8) ~ 3,  # Green Left (8)
+      
+      # People's Party for Freedom and Democracy (VVD), Democrats '66 (D66)
+      prtvtnl %in% c(3, 5) |
+        prtvtanl %in% c(3, 5) |
+        prtvtbnl %in% c(3, 5) | 
+        prtvtcnl %in% c(3, 5) |
+        prtvtdnl %in% c(1, 6, 11) |
+        prtvtenl %in% c(1, 6, 11, 12) | 
+        prtvtfnl %in% c(1, 6, 11) |
+        prtvtgnl %in% c(1, 6, 11, 12) |
+        prtvthnl %in% c(1, 6, 11, 12) |
+        prtvtinl %in% c(1, 6) ~ 4,  # VVD (1), D66 (6)
+      
+      # Christian Democratic Appeal (CDA), Christian Union (CU)
+      prtvtnl %in% c(1, 8, 10) |
+        prtvtanl %in% c(1, 8, 10) |
+        prtvtbnl %in% c(1, 8, 10) | 
+        prtvtcnl %in% c(1, 8, 10) |
+        prtvtdnl %in% c(4, 8, 9) |
+        prtvtenl %in% c(4, 8, 9) | 
+        prtvtfnl %in% c(5, 7, 9) |
+        prtvtgnl %in% c(5, 7, 9) |
+        prtvthnl %in% c(5, 7, 9) |
+        prtvtinl %in% c(5, 7, 9) ~ 5,  # CDA (5), CU (7), SGP (9)
+      
+      # Party for Freedom (PVV), Forum for Democracy (FvD), JA21
+      prtvtnl %in% c(4, 9) |
+        prtvtanl %in% c(4, 9) |
+        prtvtbnl %in% c(4, 9) | 
+        prtvtcnl %in% c(4, 9, 11) |
+        prtvtdnl %in% c(3) |
+        prtvtenl %in% c(3) | 
+        prtvtfnl %in% c(3) |
+        prtvtgnl %in% c(3, 13) |
+        prtvthnl %in% c(3, 13, 16) |
+        prtvtinl %in% c(3, 13, 16) ~ 6,  # PVV (3), FvD (13), JA21 (16)
+      
+      # BoerBurgerBeweging (BBB)
+      prtvthnl %in% c(17) |
+        prtvtinl %in% c(17) ~ 7,  # BBB (17)
+      
+      # Party for the Animals (PvdD), Volt, 50PLUS
+      prtvtanl %in% c(11) |
+        prtvtcnl %in% c(12) |
+        prtvtdnl %in% c(10) | 
+        prtvtenl %in% c(10) |
+        prtvtfnl %in% c(10) |
+        prtvtgnl %in% c(10) | 
+        prtvthnl %in% c(10, 15) |
+        prtvtinl %in% c(10, 11, 15) ~ 8,  # PvdD (10), 50PLUS (11), Volt (15)
+      
+      # Other
+      prtvtnl %in% c(11) |
+        prtvtanl %in% c(12) |
+        prtvtbnl %in% c(11) | 
+        prtvtcnl %in% c(13) |
+        prtvtdnl %in% c(12) |
+        prtvtenl %in% c(13) | 
+        prtvtfnl %in% c(16) |
+        prtvtgnl %in% c(14, 16) |
+        prtvthnl %in% c(14, 31) |
+        prtvtinl %in% c(12, 14, 31) ~ 9,  # DENK (12), Artikel1/Bij1 (14), Other (31)
+      
+      # Blanc
+      prtvtanl %in% c(13) |
+        prtvtbnl %in% c(12) |
+        prtvtcnl %in% c(14) | 
+        prtvtdnl %in% c(13) |
+        prtvtenl %in% c(14) |
+        prtvtfnl %in% c(17) | 
+        prtvtgnl %in% c(17) |
+        prtvthnl %in% c(18) |
+        prtvtinl %in% c(18) ~ 10,  # Blanc (18)
+      
+      # Fallback: Keep existing values
+      TRUE ~ voted
+    )
+  )
+
+
+# Ireland: Recode including new variable prtvteie (Wave 11)
+ess_filtered <- ess_filtered |>
+  mutate(
+    voted = case_when(
+      # Sinn Féin, Socialist Party, Solidarity/PBP, Independent
+      prtvtie %in% c(6) |
+        prtvtaie %in% c(6, 7, 8, 9) | 
+        prtvtbie %in% c(1, 7, 9) |
+        prtvtcie %in% c(1, 7, 9) | 
+        prtvtdie %in% c(4, 7, 8, 11, 13) |
+        prtvteie %in% c(4, 7, 8) ~ 1,  # Sinn Féin (4), Socialist Party (7), Solidarity/PBP (8)
+      
+      # Labour, Social Democrats
+      prtvtie %in% c(3) |
+        prtvtaie %in% c(5) | 
+        prtvtbie %in% c(6, 8) |
+        prtvtcie %in% c(6, 8) | 
+        prtvtdie %in% c(3, 12) |
+        prtvteie %in% c(3, 11) ~ 2,  # Labour (3), Social Democrats (11)
+      
+      # Green Party
+      prtvtie %in% c(5) |
+        prtvtaie %in% c(3) | 
+        prtvtbie %in% c(4) |
+        prtvtcie %in% c(4) | 
+        prtvtdie %in% c(6) |
+        prtvteie %in% c(6) ~ 3,  # Green Party (6)
+      
+      # Progressive Democrats (Nicht mehr existent, entfernt)
+      
+      # Fianna Fáil, Fine Gael, Renua Ireland, Aontu
+      prtvtie %in% c(1, 2) |
+        prtvtaie %in% c(1, 2) | 
+        prtvtbie %in% c(2, 3) |
+        prtvtcie %in% c(2, 3) | 
+        prtvtdie %in% c(1, 2, 9, 10) |
+        prtvteie %in% c(1, 2, 9, 10) ~ 5,  # Fianna Fáil (1), Fine Gael (2), Renua (9), Aontu (10)
+      
+      # Other
+      prtvtie %in% c(8) |
+        prtvtaie %in% c(10) | 
+        prtvtbie %in% c(5, 10) |
+        prtvtcie %in% c(5, 10) | 
+        prtvtdie %in% c(5, 14) |
+        prtvteie %in% c(5, 12) ~ 9,  # , Independent (5), Other (12)
+      
+      # Fallback: Keep existing values
+      TRUE ~ voted
+    )
+  )
+
+
+# Spain: Recode including new variable prtvtges (Wave 11)
+ess_filtered <- ess_filtered |>
+  mutate(
+    voted = case_when(
+      # Unidas Podemos (eingegangen in SUMAR), Izquierda Unida, Compromís, Regional alliances
+      prtvtes %in% c(3) |
+        prtvtaes %in% c(3) |
+        prtvtbes %in% c(3) | 
+        prtvtces %in% c(4, 5, 11) |
+        prtvtdes %in% c(3, 7, 8, 12) | 
+        prtvtees %in% c(3, 7, 9, 19) |
+        prtvtfes %in% c(4, 5, 10) |
+        prtvtges %in% c(4) ~ 1,  # SUMAR (4)
+      
+      # PSOE
+      prtvtes %in% c(2, 11) |
+        prtvtaes %in% c(2, 11) |
+        prtvtbes %in% c(2) | 
+        prtvtces %in% c(2) |
+        prtvtdes %in% c(2) |
+        prtvtees %in% c(2) | 
+        prtvtfes %in% c(1) |
+        prtvtges %in% c(2) ~ 2,  # PSOE (2)
+      
+      # ICV, Más País (aufgegangen in SUMAR)
+      prtvtes %in% c(6) |
+        prtvtaes %in% c(6) |
+        prtvtees %in% c(8) | 
+        prtvtfes %in% c(7, 15) |
+        prtvtges %in% c(4) ~ 3,  # SUMAR (4)
+      
+      # UPyD, Ciudadanos (stark zurückgegangen, nicht mehr in Welle 11)
+      
+      # PP, PNV, CiU, Regional alliances
+      prtvtes %in% c(1, 4, 7) |
+        prtvtaes %in% c(1, 4, 7) |
+        prtvtbes %in% c(1, 4, 6) | 
+        prtvtces %in% c(1, 3, 7, 12) |
+        prtvtdes %in% c(1, 11) |
+        prtvtees %in% c(1, 11, 13, 17) | 
+        prtvtfes %in% c(2, 9, 11, 14) |
+        prtvtges %in% c(1, 8) ~ 5,  # PP (1), EAJ-PNV (8)
+      
+      # VOX
+      prtvtees %in% c(16) |
+        prtvtfes %in% c(3) |
+        prtvtges %in% c(3) ~ 6,  # VOX (3)
+      
+      # ERC, Regional alliances
+      prtvtes %in% c(5, 8, 9, 10, 12) |
+        prtvtaes %in% c(5, 8, 9, 10, 12, 13) | 
+        prtvtbes %in% c(7, 8, 9) |
+        prtvtces %in% c(8, 9, 10) |
+        prtvtdes %in% c(10, 14, 15, 18) | 
+        prtvtees %in% c(10, 12, 14, 15, 18) |
+        prtvtfes %in% c(8, 12, 13, 16, 18) |
+        prtvtges %in% c(5, 6, 7, 9) ~ 8,  # ERC (5), Junts x Cat (6), EH-Bildu (7), BNG (9)
+      
+      # Other
+      prtvtes %in% c(68) |
+        prtvtaes %in% c(74) |
+        prtvtbes %in% c(74) | 
+        prtvtces %in% c(14) |
+        prtvtdes %in% c(50) |
+        prtvtees %in% c(20, 53) | 
+        prtvtfes %in% c(17, 53) |
+        prtvtges %in% c(12, 50) ~ 9,  # PACMA (12), Other (50)
+      
+      # Blank/Invalid
+      prtvtaes %in% c(75, 76) |
+        prtvtbes %in% c(75, 76) |
+        prtvtces %in% c(15, 16) | 
+        prtvtdes %in% c(51, 52) |
+        prtvtees %in% c(54, 55) |
+        prtvtfes %in% c(54, 55) |
+        prtvtges %in% c(51, 52) ~ 10,  # Blank (51), Invalid (52)
+      
+      # Fallback: Keep existing values
+      TRUE ~ voted
+    )
+  )
+
+
+# Finland: Recode including new variable prtvtffi (Wave 11)
+ess_filtered <- ess_filtered |>
+  mutate(
+    voted = case_when(
+      # Left Alliance, Communist Party
+      prtvtfi %in% c(7, 10, 11, 12) |
+        prtvtafi %in% c(9, 10, 11) | 
+        prtvtbfi %in% c(15, 16, 17, 18) |
+        prtvtcfi %in% c(14, 15, 16) | 
+        prtvtdfi %in% c(12, 13, 14) |
+        prtvtefi %in% c(18, 19) |
+        prtvtffi %in% c(7, 18) ~ 1,  # Left Alliance (7), Communist Party (18)
+      
+      # Social Democrats
+      prtvtfi %in% c(9) |
+        prtvtafi %in% c(8) |
+        prtvtbfi %in% c(14, 11) | 
+        prtvtcfi %in% c(13, 17) |
+        prtvtdfi %in% c(11, 15) |
+        prtvtefi %in% c(17) |
+        prtvtffi %in% c(1) ~ 2,  # Social Democratic Party (1)
+      
+      # Green League
+      prtvtfi %in% c(8) |
+        prtvtafi %in% c(7) |
+        prtvtbfi %in% c(13) | 
+        prtvtcfi %in% c(12) |
+        prtvtdfi %in% c(10) |
+        prtvtefi %in% c(16) |
+        prtvtffi %in% c(6) ~ 3,  # Green League (6)
+      
+      # Swedish People's Party, Liberals
+      prtvtfi %in% c(2, 3) |
+        prtvtbfi %in% c(2, 3) |
+        prtvtcfi %in% c(2) | 
+        prtvtdfi %in% c(2) |
+        prtvtefi %in% c(2, 8) |
+        prtvtffi %in% c(4, 9, 16) ~ 4,  # Swedish People's Party (4), The Liberal Party - Freedom to Choose, Movement Now (16)
+      
+      # National Coalition Party, Christian Democrats
+      prtvtfi %in% c(1, 6) |
+        prtvtafi %in% c(1, 2, 3, 6) |
+        prtvtbfi %in% c(1, 6) | 
+        prtvtcfi %in% c(1, 5) |
+        prtvtdfi %in% c(1, 5) |
+        prtvtefi %in% c(1, 7) |
+        prtvtffi %in% c(3, 5) ~ 5,  # National Coalition Party (3), Christian Democrats (5)
+      
+      # True Finns (Perussuomalaiset)
+      prtvtfi %in% c(5) |
+        prtvtafi %in% c(5) |
+        prtvtbfi %in% c(5, 8) | 
+        prtvtcfi %in% c(4) |
+        prtvtdfi %in% c(4) |
+        prtvtefi %in% c(5) |
+        prtvtffi %in% c(8) ~ 6,  # True Finns (8)
+      
+      # Centre Party
+      prtvtfi %in% c(4) |
+        prtvtafi %in% c(4) |
+        prtvtbfi %in% c(4) | 
+        prtvtcfi %in% c(3) |
+        prtvtdfi %in% c(3) |
+        prtvtefi %in% c(3) |
+        prtvtffi %in% c(2) ~ 7,  # Centre Party (2)
+      
+      # Pirate Party, Independence Party
+      prtvtcfi %in% c(8, 10) |
+        prtvtdfi %in% c(7, 8) |
+        prtvtefi %in% c(10) |
+        prtvtffi %in% c(10) ~ 8,  # Pirate Party (10)
+      
+      # Other
+      prtvtfi %in% c(13, 14) |
+        prtvtafi %in% c(12) |
+        prtvtbfi %in% c(9, 19) | 
+        prtvtcfi %in% c(6, 7, 11, 18) |
+        prtvtdfi %in% c(6, 9, 16) |
+        prtvtefi %in% c(22) |
+        prtvtffi %in% c(11, 12, 13, 14, 15, 17, 19, 20, 21, 22, 23, 24) ~ 9,  # Diverse kleinere Parteien
+        
+      # Fallback: Keep existing values
+      TRUE ~ voted
+    )
+  )
+
+
+# Portugal: Recode including new variable prtvtept (Wave 11)
+ess_filtered <- ess_filtered |>
+  mutate(
+    voted = case_when(
+      # Bloco de Esquerda (BE), Kommunisten (PCP-PEV, PCTP/MRPP)
+      prtvtpt %in% c(1, 5, 6, 8) |
+        prtvtapt %in% c(1, 3, 4, 9) | 
+        prtvtbpt %in% c(1, 3, 4, 9) |
+        prtvtcpt %in% c(2, 3, 8) | 
+        prtvtdpt %in% c(2, 3, 12) |
+        prtvtept %in% c(3, 14, 15) ~ 1,  # Bloco de Esquerda (3), CDU (PCP-PEV) (14), PCTP/MRPP (15)
+      
+      # Partido Socialista (PS)
+      prtvtpt %in% c(4, 10) |
+        prtvtapt %in% c(6, 11) |
+        prtvtbpt %in% c(6, 11) | 
+        prtvtcpt %in% c(13) |
+        prtvtdpt %in% c(7, 18) |
+        prtvtept %in% c(9, 18) ~ 2,  # LIVRE(9), PS (18)
+      
+      # Pessoas-Animais-Natureza (PAN), LIVRE
+      prtvtpt == 3 |
+        prtvtcpt %in% c(5, 9, 15) |
+        prtvtdpt %in% c(5, 11) |
+        prtvtept %in% c(11, 13) ~ 3,  # MPT (11), PAN (13)
+      
+      # Partido Social Democrata (PSD), Alianca, Iniciativa Liberal
+      prtvtpt == 11 |
+        prtvtapt == 10 |
+        prtvtbpt == 10 |
+        prtvtcpt %in% c(16) | 
+        prtvtdpt %in% c(16) |
+        prtvtept %in% c(1, 7, 16) ~ 4,  # Iniciativa Liberal (IL) (7), PSD (16)
+      
+      # CDS-Partido Popular (CDS-PP), PPM
+      prtvtpt %in% c(2, 9) |
+        prtvtapt %in% c(2, 7) |
+        prtvtbpt %in% c(2, 7) | 
+        prtvtcpt %in% c(7, 10, 12) |
+        prtvtept %in% c(4, 17) ~ 5,  # CDS-PP (4), PPM (17)
+      
+      # CHEGA
+      prtvtpt == 7 |
+        prtvtapt == 8 |
+        prtvtbpt == 8 |
+        prtvtdpt == 4 |
+        prtvtept %in% c(5) ~ 6,  # CHEGA (5)
+      
+      # Other (inkl. Juntos pelo Povo, Partido da Terra, etc.)
+      prtvtpt == 12 |
+        prtvtbpt == 13 |
+        prtvtcpt %in% c(11, 14, 18) | 
+        prtvtdpt %in% c(21, 6) |
+        prtvtept %in% c(2, 6, 8, 10, 12, 19, 20, 21, 23) ~ 9,  # Diverse kleinere Parteien
+       
+      # Blank/Nulo
+      prtvtpt == 13 |
+        prtvtapt == 12 |
+        prtvtbpt == 12 |
+        prtvtcpt == 17 | 
+        prtvtdpt == 22 |
+        prtvtept %in% c(22) ~ 10,  # Blanc/Nulo (22)
+      
+      # Fallback: Keep existing values
+      TRUE ~ voted
+    )
+  )
+
+
+# Recode: Voted for the Greens
+ess_filtered <- ess_filtered |>
+  mutate(
+    vote_green = case_when(
+      voted == 3 ~ 1, # Green
+      voted %in% c(1, 2, 4, 5, 6, 7, 8, 9) ~ 0, # Other
+      TRUE ~ NA_real_ # NA for non-voters and invalid votes
+    )
+  )
+
+# Recode: Voted for the Radical Right
+ess_filtered <- ess_filtered |>
+  mutate(
+    vote_radright = case_when(
+      voted == 6 ~ 1, # Radical Right
+      voted %in% c(1, 2, 3, 4, 5, 7, 8, 9) ~ 0, # Other
+      TRUE ~ NA_real_ # NA for non-voters and invalid votes
+    )
+  )
+
+# Define country samples
+
+
+
+ess_filtered <- ess_filtered |>
+  mutate(
+    Green_sample = case_when(
+      (cntry %in% c("BE", "CH", "DE", "FI", "GB", "IE", "NL", "NO", "SE")) ~ 1,
+      (cntry == "FR" & year != 2023) ~ 1,  # Exclude the year 2023 for France (wave 11) -> because of NUPES not possible to look at Green voting seperately 
+      TRUE ~ NA_real_
+    ),
+    RR_sample = case_when(
+      cntry %in% c("BE", "CH", "DE", "FI", "FR", "GB", "NL", "NO", "SE") ~ 1,
+      TRUE ~ NA_real_
+    )
+  )
+
+
+df <- ess_filtered
+
+df <- df |> 
+  mutate(cohort_fct = case_when(
+      cohort == 1 ~ "post-war",
+      cohort == 2 ~ "60-70s",
+      cohort == 3 ~ "80s",
+      cohort == 4 ~ "90s",
+      cohort == 5 ~ "millennial"),
+    cohort_fct = cohort_fct |> 
+      fct_relevel("post-war", "60-70s", "80s", "90s",
+                  "millennial"),
+    cohort_alt_fct = case_when(
+      cohort_alt == 1 ~ "1930s",
+      cohort_alt == 2 ~ "1940s",
+      cohort_alt == 3 ~ "1950s",
+      cohort_alt == 4 ~ "1960s",
+      cohort_alt == 5 ~ "1970s",
+      cohort_alt == 6 ~ "1980s",
+      cohort_alt == 7 ~ "1990+"),
+    cohort_alt_fct = cohort_alt_fct |> 
+      fct_relevel("1930s", "1940s", "1950s", "1960s", "1970s",
+                  "1980s", "1990+"),
+    age_grp_fct = case_when(
+      age_group == 1 ~ "18-29",
+      age_group == 2 ~ "30-65",
+      age_group == 3 ~ "above 65"
+    ),
+    edu_fct = case_when(
+      education == 0 ~ "(below) lower secondary",
+      education == 1 ~ "upper secondary",
+      education == 2 ~ "tertiary"),
+    edu_fct = edu_fct |> fct_relevel(
+               "(below) lower secondary", 
+               "upper secondary",
+               "tertiary"),
+    gndr_fct = case_when(
+      gndr == 1 ~ "men",
+      gndr == 2 ~ "women"),
+    cntry_id_fct = factor(cntry_id),
+    essround_fct = factor(essround),
+    vote_abst_fct = case_when(
+      voted == 0 ~ "abstention",
+      voted == 1 ~ "Communist/Socialist",
+      voted == 2 ~ "Social democracy",
+      voted == 3 ~ "Green",
+      voted == 4 ~ "Liberal",
+      voted == 5 ~ "Conservative/Christian democracy",
+      voted == 6 ~ "Radical right",
+      voted == 7 ~ "Agrarian"),
+    vote_fct = case_when(
+      voted == 1 ~ "Communist/Socialist",
+      voted == 2 ~ "Social democracy",
+      voted == 3 ~ "Green",
+      voted == 4 ~ "Liberal",
+      voted == 5 ~ "Conservative/Christian democracy",
+      voted == 6 ~ "Radical right",
+      voted == 7 ~ "Agrarian"),
+    vote_green_norr = case_match(voted,
+      3 ~ 1,
+      c(1,2,4,5,7) ~ 0),
+    vote_rr_nogreen = case_match(voted,
+      6 ~1,
+      c(1,2,4,5,7) ~ 0),
+    married = case_when(
+      marital == 5 | maritala == 6 | maritalb == 6 ~ "never",
+      marital  < 5 | maritala  < 6 | maritalb  < 6 ~ "at one point" ),
+    psppsgva = ifelse(psppsgva > 5, NA, psppsgva),
+    psppipla = ifelse(psppipla > 5, NA, psppipla),
+    response = (psppsgva + psppipla)/2)
+
+df <- df |> 
+  dplyr::select(essround, essround_fct, cntry, cntry_id, cntry_id_fct, 
+                vote_abst_fct, vote_fct, vote_green, vote_radright, 
+                vote_green_norr, vote_rr_nogreen, 
+                cohort, cohort_fct, cohort_alt_fct,
+                age_grp_fct, class5fac, class8fac,
+                education, edu_fct, edulowhigh, gndr, gndr_fct, married, response,
+                agea_clean, age_group, immigrant, Green_sample, RR_sample, cntry_wave_id, pspwght, dweight, pweight)
+
+saveRDS(df, here("data", "processed", "ess_short_1_11.rds"))
+
+```
+
+```{r}
+
+```

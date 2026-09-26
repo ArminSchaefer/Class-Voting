@@ -1,0 +1,507 @@
+---
+title: "Process ESS Germany"
+subtitle: "Class scheme"
+author:
+  - name: Armin Schäfer
+    affiliation:
+      - id: jgu
+        name: Johannes Gutenberg University
+    orcid: 0000-0002-2538-0092
+    email: schaefer@politik.uni-mainz.de
+format: 
+  html:
+    number-sections: false
+    code-fold: true
+    code-summary: "Show the code"
+    self-contained: true
+embed-resources: true
+---
+
+# Preparation
+
+## Packages and appearance
+
+```{r}
+#| label: setup
+#| echo: true
+#| message: false
+#| warning: false
+
+if(!require("pacman")) {install.packages("pacman");library(pacman)}
+p_load(here, rio, tidyverse)
+
+```
+
+## Load total data set
+
+```{r}
+#| label: getdata
+
+ess_all_rounds <- import(here("data", "raw", "ESS_rounds_1-11.csv"), trust = TRUE)
+
+```
+
+## Code for the class scheme
+```{r}
+
+ess_class_scheme <- ess_all_rounds |> 
+  mutate(
+    
+    # class scheme  
+    isco  = ifelse(essround<6, iscoco, isco08),
+    isco_partner = ifelse(essround<6, iscocop, isco08p),
+    
+    isco_mainjob = isco,
+    isco_mainjob = ifelse(is.na(isco_mainjob), -9, isco_mainjob),
+    emplrel_r = emplrel,
+    emplno_r = emplno,
+    emplno_r = case_when(
+      is.na(emplno_r) ~ 0,
+      emplno_r >= 1 &  emplno_r <= 9 ~ 1,
+      emplno_r >= 10 &  emplno_r <= 66665 ~ 2),
+    selfem_mainjob = case_when(
+      emplrel_r == 1 ~ 1,
+      emplrel_r == 2 & emplno_r == 0 ~2,
+      emplrel_r == 3 ~3,
+      emplrel_r == 2 & emplno_r == 1 ~ 3,
+      emplrel_r == 2 & emplno_r == 2 ~4),
+    
+    class16_r = case_when(
+      # large employers
+      selfem_mainjob == 4 ~ 1,
+      
+      # self-employed professionals
+      (selfem_mainjob == 2 | selfem_mainjob == 3) & isco_mainjob >= 2000 & isco_mainjob <= 2162 ~ 2,
+      (selfem_mainjob == 2 | selfem_mainjob == 3) & isco_mainjob >= 2164 & isco_mainjob <= 2165 ~ 2,
+      (selfem_mainjob == 2 | selfem_mainjob == 3) & isco_mainjob >= 2200 & isco_mainjob <= 2212 ~ 2,
+      (selfem_mainjob == 2 | selfem_mainjob == 3) & isco_mainjob == 2250 ~ 2,
+      (selfem_mainjob == 2 | selfem_mainjob == 3) & isco_mainjob >= 2261 & isco_mainjob <= 2262 ~ 2,
+      (selfem_mainjob == 2 | selfem_mainjob == 3) & isco_mainjob >= 2300 & isco_mainjob <= 2330 ~ 2,
+      (selfem_mainjob == 2 | selfem_mainjob == 3) & isco_mainjob >= 2350 & isco_mainjob <= 2352 ~ 2,
+      (selfem_mainjob == 2 | selfem_mainjob == 3) & isco_mainjob >= 2359 & isco_mainjob <= 2432 ~ 2,
+      (selfem_mainjob == 2 | selfem_mainjob == 3) & isco_mainjob >= 2500 & isco_mainjob <= 2619 ~ 2,
+      (selfem_mainjob == 2 | selfem_mainjob == 3) & isco_mainjob == 2621 ~ 2,
+      (selfem_mainjob == 2 | selfem_mainjob == 3) & isco_mainjob >= 2630 & isco_mainjob <= 2634 ~ 2,
+      (selfem_mainjob == 2 | selfem_mainjob == 3) & isco_mainjob >= 2636 & isco_mainjob <= 2640 ~ 2,
+      (selfem_mainjob == 2 | selfem_mainjob == 3) & isco_mainjob >= 2642 & isco_mainjob <= 2643 ~ 2,
+      
+      # Small business owners with employees (3)
+      selfem_mainjob == 3 & isco_mainjob >= 1000 & isco_mainjob <= 1439 ~ 3,
+      selfem_mainjob == 3 & isco_mainjob == 2163 ~ 3,
+      selfem_mainjob == 3 & isco_mainjob == 2166 ~ 3,
+      selfem_mainjob == 3 & isco_mainjob >= 2220 & isco_mainjob <= 2240 ~ 3,
+      selfem_mainjob == 3 & isco_mainjob == 2260 ~ 3,
+      selfem_mainjob == 3 & isco_mainjob >= 2263 & isco_mainjob <= 2269 ~ 3,
+      selfem_mainjob == 3 & isco_mainjob >= 2340 & isco_mainjob <= 2342 ~ 3,
+      selfem_mainjob == 3 & isco_mainjob >= 2353 & isco_mainjob <= 2356 ~ 3,
+      selfem_mainjob == 3 & isco_mainjob >= 2433 & isco_mainjob <= 2434 ~ 3,
+      selfem_mainjob == 3 & isco_mainjob == 2620 ~ 3,
+      selfem_mainjob == 3 & isco_mainjob == 2622 ~ 3,
+      selfem_mainjob == 3 & isco_mainjob == 2635 ~ 3,
+      selfem_mainjob == 3 & isco_mainjob == 2641 ~ 3,
+      selfem_mainjob == 3 & isco_mainjob >= 2650 & isco_mainjob <= 2659 ~ 3,
+      selfem_mainjob == 3 & isco_mainjob >= 3000 & isco_mainjob <= 9629 ~ 3,
+      
+      # Small business owners without employees (4)
+      selfem_mainjob == 2 & isco_mainjob >= 1000 & isco_mainjob <= 1439 ~ 4,
+      selfem_mainjob == 2 & isco_mainjob == 2163 ~ 4,
+      selfem_mainjob == 2 & isco_mainjob == 2166 ~ 4,
+      selfem_mainjob == 2 & isco_mainjob >= 2220 & isco_mainjob <= 2240 ~ 4,
+      selfem_mainjob == 2 & isco_mainjob == 2260 ~ 4,
+      selfem_mainjob == 2 & isco_mainjob >= 2263 & isco_mainjob <= 2269 ~ 4,
+      selfem_mainjob == 2 & isco_mainjob >= 2340 & isco_mainjob <= 2342 ~ 4,
+      selfem_mainjob == 2 & isco_mainjob >= 2353 & isco_mainjob <= 2356 ~ 4,
+      selfem_mainjob == 2 & isco_mainjob >= 2433 & isco_mainjob <= 2434 ~ 4,
+      selfem_mainjob == 2 & isco_mainjob == 2620 ~ 4,
+      selfem_mainjob == 2 & isco_mainjob == 2622 ~ 4,
+      selfem_mainjob == 2 & isco_mainjob == 2635 ~ 4,
+      selfem_mainjob == 2 & isco_mainjob == 2641 ~ 4,
+      selfem_mainjob == 2 & isco_mainjob >= 2650 & isco_mainjob <= 2659 ~ 4,
+      selfem_mainjob == 2 & isco_mainjob >= 3000 & isco_mainjob <= 9629 ~ 4,
+      
+      # Technical experts (5)
+      selfem_mainjob == 1 & isco_mainjob >= 2100 & isco_mainjob <= 2162 ~ 5,
+      selfem_mainjob == 1 & isco_mainjob >= 2164 & isco_mainjob <= 2165 ~ 5,
+      selfem_mainjob == 1 & isco_mainjob >= 2500 & isco_mainjob <= 2529 ~ 5,
+      
+      # Technicians (6)
+      selfem_mainjob == 1 & isco_mainjob >= 3100 & isco_mainjob <= 3155 ~ 6,
+      selfem_mainjob == 1 & isco_mainjob >= 3210 & isco_mainjob <= 3214 ~ 6,
+      selfem_mainjob == 1 & isco_mainjob == 3252 ~ 6,
+      selfem_mainjob == 1 & isco_mainjob >= 3500 &  isco_mainjob <= 3522 ~ 6,
+      
+      # Skilled manual (7)
+      selfem_mainjob == 1 & isco_mainjob >= 6000 & isco_mainjob <= 7549 ~ 7,
+      selfem_mainjob == 1 & isco_mainjob >= 8310 & isco_mainjob <= 8312 ~ 7,
+      selfem_mainjob == 1 & isco_mainjob == 8330 ~ 7,
+      selfem_mainjob == 1 & isco_mainjob >= 8332 & isco_mainjob <= 8340 ~ 7,
+      selfem_mainjob == 1 & isco_mainjob >= 8342 & isco_mainjob <= 8344 ~ 7,
+      
+      # Low-skilled manual (8)
+      selfem_mainjob == 1 & isco_mainjob >= 8000 & isco_mainjob <= 8300 ~ 8,
+      selfem_mainjob == 1 & isco_mainjob >= 8320 & isco_mainjob <= 8321 ~ 8,
+      selfem_mainjob == 1 & isco_mainjob == 8341 ~ 8,
+      selfem_mainjob == 1 & isco_mainjob == 8350 ~ 8,
+      selfem_mainjob == 1 & isco_mainjob >= 9200 & isco_mainjob <= 9334 ~ 8,
+      selfem_mainjob == 1 & isco_mainjob >= 9600 & isco_mainjob <= 9620 ~ 8,
+      selfem_mainjob == 1 & isco_mainjob >= 9622 & isco_mainjob <= 9629 ~ 8,
+      
+      # Higher-grade managers and administrators (9)
+      selfem_mainjob == 1 & isco_mainjob >= 1000 & isco_mainjob <= 1300 ~ 9,
+      selfem_mainjob == 1 & isco_mainjob >= 1320 & isco_mainjob <= 1349 ~ 9,
+      selfem_mainjob == 1 & isco_mainjob >= 2400 & isco_mainjob <= 2432 ~ 9,
+      selfem_mainjob == 1 & isco_mainjob >= 2610 & isco_mainjob <= 2619 ~ 9,
+      selfem_mainjob == 1 & isco_mainjob == 2631 ~ 9,
+      selfem_mainjob == 1 & isco_mainjob >= 100 & isco_mainjob <= 110 ~ 9,
+      
+      # Lower-grade managers and administrators (10)
+      selfem_mainjob == 1 & isco_mainjob >= 1310 & isco_mainjob <= 1312 ~ 10,
+      selfem_mainjob == 1 & isco_mainjob >= 1400 & isco_mainjob <= 1439 ~ 10,
+      selfem_mainjob == 1 & isco_mainjob >= 2433 & isco_mainjob <= 2434 ~ 10,
+      selfem_mainjob == 1 & isco_mainjob >= 3300 & isco_mainjob <= 3339 ~ 10,
+      selfem_mainjob == 1 & isco_mainjob == 3343 ~ 10,
+      selfem_mainjob == 1 & isco_mainjob >= 3350 & isco_mainjob <= 3359 ~ 10,
+      selfem_mainjob == 1 & isco_mainjob == 3411 ~ 10,
+      selfem_mainjob == 1 & isco_mainjob == 5221 ~ 10,
+      selfem_mainjob == 1 & isco_mainjob >= 200 & isco_mainjob <= 210 ~ 10,
+      
+      # Skilled clerks (11)
+      selfem_mainjob == 1 & isco_mainjob >= 3340 & isco_mainjob <= 3342 ~ 11,
+      selfem_mainjob == 1 & isco_mainjob == 3344 ~ 11,
+      selfem_mainjob == 1 & isco_mainjob >= 4000 & isco_mainjob <= 4131 ~ 11,
+      selfem_mainjob == 1 & isco_mainjob >= 4200 & isco_mainjob <= 4221 ~ 11,
+      selfem_mainjob == 1 & isco_mainjob >= 4224 & isco_mainjob <= 4413 ~ 11,
+      selfem_mainjob == 1 & isco_mainjob >= 4415 & isco_mainjob <= 4419 ~ 11,
+      
+      # Unskilled clerks (12)
+      selfem_mainjob == 1 & isco_mainjob == 4132 ~ 12,
+      selfem_mainjob == 1 & isco_mainjob == 4222 ~ 12,
+      selfem_mainjob == 1 & isco_mainjob == 4223 ~ 12,
+      selfem_mainjob == 1 & isco_mainjob == 5230 ~ 12,
+      selfem_mainjob == 1 & isco_mainjob == 9621 ~ 12,
+      
+      # Socio-cultural professionals (13)
+      selfem_mainjob == 1 & isco_mainjob >= 2200 & isco_mainjob <= 2212 ~ 13,
+      selfem_mainjob == 1 & isco_mainjob == 2250 ~ 13,
+      selfem_mainjob == 1 & isco_mainjob >= 2261 & isco_mainjob <= 2262 ~ 13,
+      selfem_mainjob == 1 & isco_mainjob >= 2300 & isco_mainjob <= 2330 ~ 13,
+      selfem_mainjob == 1 & isco_mainjob >= 2350 & isco_mainjob <= 2352 ~ 13,
+      selfem_mainjob == 1 & isco_mainjob == 2359 ~ 13,
+      selfem_mainjob == 1 & isco_mainjob == 2600 ~ 13,
+      selfem_mainjob == 1 & isco_mainjob == 2621 ~ 13,
+      selfem_mainjob == 1 & isco_mainjob == 2630 ~ 13,
+      selfem_mainjob == 1 & isco_mainjob >= 2632 & isco_mainjob <= 2634 ~ 13,
+      selfem_mainjob == 1 & isco_mainjob >= 2636 & isco_mainjob <= 2640 ~ 13,
+      selfem_mainjob == 1 & isco_mainjob >= 2642 & isco_mainjob <= 2643 ~ 13,
+      
+      # Socio-cultural semi-professionals (14)
+      selfem_mainjob == 1 & isco_mainjob == 2163 ~ 14,
+      selfem_mainjob == 1 & isco_mainjob == 2166 ~ 14,
+      selfem_mainjob == 1 & isco_mainjob >= 2220 & isco_mainjob <= 2240 ~ 14,
+      selfem_mainjob == 1 & isco_mainjob == 2260 ~ 14,
+      selfem_mainjob == 1 & isco_mainjob >= 2263 & isco_mainjob <= 2269 ~14,
+      selfem_mainjob == 1 & isco_mainjob >= 2340 & isco_mainjob <= 2342 ~14,
+      selfem_mainjob == 1 & isco_mainjob >= 2353 & isco_mainjob <= 2356 ~14,
+      selfem_mainjob == 1 & isco_mainjob == 2620 ~ 14,
+      selfem_mainjob == 1 & isco_mainjob == 2622 ~ 14,
+      selfem_mainjob == 1 & isco_mainjob == 2635 ~ 14,
+      selfem_mainjob == 1 & isco_mainjob == 2641 ~ 14,
+      selfem_mainjob == 1 & isco_mainjob >= 2650 & isco_mainjob <= 2659 ~ 14,
+      selfem_mainjob == 1 & isco_mainjob == 3200 ~ 14,
+      selfem_mainjob == 1 & isco_mainjob >= 3220 & isco_mainjob <= 3230 ~ 14,
+      selfem_mainjob == 1 & isco_mainjob == 3250 ~ 14,
+      selfem_mainjob == 1 & isco_mainjob >= 3253 & isco_mainjob <= 3257 ~ 14,
+      selfem_mainjob == 1 & isco_mainjob == 3259 ~ 14,
+      selfem_mainjob == 1 & isco_mainjob >= 3400 & isco_mainjob <= 3410 ~ 14,
+      selfem_mainjob == 1 & isco_mainjob >= 3412 & isco_mainjob <= 3413 ~ 14,
+      selfem_mainjob == 1 & isco_mainjob >= 3430 & isco_mainjob <= 3433 ~ 14,
+      selfem_mainjob == 1 & isco_mainjob == 3435 ~ 14,
+      selfem_mainjob == 1 & isco_mainjob == 4414 ~ 14,
+      
+      # Skilled service (15)
+      selfem_mainjob == 1 & isco_mainjob == 3240 ~ 15,
+      selfem_mainjob == 1 & isco_mainjob == 3251 ~ 15,
+      selfem_mainjob == 1 & isco_mainjob == 3258 ~ 15,
+      selfem_mainjob == 1 & isco_mainjob >= 3420 & isco_mainjob <= 3423 ~ 15,
+      selfem_mainjob == 1 & isco_mainjob == 3434 ~ 15,
+      selfem_mainjob == 1 & isco_mainjob >= 5000 & isco_mainjob <= 5120 ~ 15,
+      selfem_mainjob == 1 & isco_mainjob >= 5140 & isco_mainjob <= 5142 ~ 15,
+      selfem_mainjob == 1 & isco_mainjob == 5163 ~ 15,
+      selfem_mainjob == 1 & isco_mainjob == 5165 ~ 15,
+      selfem_mainjob == 1 & isco_mainjob == 5200 ~ 15,
+      selfem_mainjob == 1 & isco_mainjob == 5220 ~ 15,
+      selfem_mainjob == 1 & isco_mainjob >= 5222 & isco_mainjob <= 5223 ~ 15,
+      selfem_mainjob == 1 & isco_mainjob >= 5241 & isco_mainjob <= 5242 ~ 15,
+      selfem_mainjob == 1 & isco_mainjob >= 5300 & isco_mainjob <= 5321 ~ 15,
+      selfem_mainjob == 1 & isco_mainjob >= 5400 & isco_mainjob <= 5413 ~ 15,
+      selfem_mainjob == 1 & isco_mainjob == 5419 ~ 15,
+      selfem_mainjob == 1 & isco_mainjob == 8331 ~ 15,
+      
+      # Low-skilled service (16)
+      selfem_mainjob == 1 & isco_mainjob >= 5130 & isco_mainjob <= 5132 ~ 16,
+      selfem_mainjob == 1 & isco_mainjob >= 5150 & isco_mainjob <= 5162 ~ 16,
+      selfem_mainjob == 1 & isco_mainjob == 5164 ~ 16,
+      selfem_mainjob == 1 & isco_mainjob == 5169 ~ 16,
+      selfem_mainjob == 1 & isco_mainjob >= 5210 & isco_mainjob <= 5212 ~ 16,
+      selfem_mainjob == 1 & isco_mainjob == 5240 ~ 16,
+      selfem_mainjob == 1 & isco_mainjob >= 5243 & isco_mainjob <= 5249 ~ 16,
+      selfem_mainjob == 1 & isco_mainjob >= 5322 & isco_mainjob <= 5329 ~ 16,
+      selfem_mainjob == 1 & isco_mainjob == 5414 ~ 16,
+      selfem_mainjob == 1 & isco_mainjob == 8322 ~ 16,
+      selfem_mainjob == 1 & isco_mainjob >= 9100 & isco_mainjob <= 9129 ~ 16,
+      selfem_mainjob == 1 & isco_mainjob >= 9400 & isco_mainjob <= 9520 ~ 16),
+    
+    # partner
+    selfem_partner = case_when(
+      emprelp == 1 ~ 1,
+      emprelp == 2 ~ 2,
+      emprelp == 3 ~ 2),
+    
+    class16_p = case_when(
+      
+      # Self-employed professionals (2)
+      selfem_partner == 2 & isco_partner >= 2000 & isco_partner <= 2162 ~ 2,
+      selfem_partner == 2 & isco_partner >= 2164 & isco_partner <= 2165 ~ 2,
+      selfem_partner == 2 & isco_partner >= 2200 & isco_partner <= 2212 ~ 2,
+      selfem_partner == 2 & isco_partner == 2250 ~ 2,
+      selfem_partner == 2 & isco_partner >= 2261 & isco_partner <= 2262 ~ 2,
+      selfem_partner == 2 & isco_partner >= 2300 & isco_partner <= 2330 ~ 2,
+      selfem_partner == 2 & isco_partner >= 2350 & isco_partner <= 2352 ~ 2,
+      selfem_partner == 2 & isco_partner >= 2359 & isco_partner <= 2432 ~ 2,
+      selfem_partner == 2 & isco_partner >= 2500 & isco_partner <= 2619 ~ 2,
+      selfem_partner == 2 & isco_partner == 2621 ~ 2,
+      selfem_partner == 2 & isco_partner >= 2630 & isco_partner <= 2634 ~ 2,
+      selfem_partner == 2 & isco_partner >= 2636 & isco_partner <= 2640 ~ 2,
+      selfem_partner == 2 & isco_partner >= 2642 & isco_partner <= 2643 ~ 2,
+      
+      # Small business owners without employees (4)
+      selfem_partner == 2 & isco_partner >= 1000 & isco_partner <= 1439 ~ 4,
+      selfem_partner == 2 & isco_partner == 2163 ~ 4,
+      selfem_partner == 2 & isco_partner == 2166 ~ 4,
+      selfem_partner == 2 & isco_partner >= 2220 & isco_partner <= 2240 ~ 4,
+      selfem_partner == 2 & isco_partner == 2260 ~ 4,
+      selfem_partner == 2 & isco_partner >= 2263 & isco_partner <= 2269 ~ 4,
+      selfem_partner == 2 & isco_partner >= 2340 & isco_partner <= 2342 ~ 4,
+      selfem_partner == 2 & isco_partner >= 2353 & isco_partner <= 2356 ~ 4,
+      selfem_partner == 2 & isco_partner >= 2433 & isco_partner <= 2434 ~ 4,
+      selfem_partner == 2 & isco_partner == 2620 ~ 4,
+      selfem_partner == 2 & isco_partner == 2622 ~ 4,
+      selfem_partner == 2 & isco_partner == 2635 ~ 4,
+      selfem_partner == 2 & isco_partner == 2641 ~ 4,
+      selfem_partner == 2 & isco_partner >= 2650 & isco_partner <= 2659 ~ 4,
+      selfem_partner == 2 & isco_partner >= 3000 & isco_partner <= 9629 ~ 4,
+      
+      
+      # Technical experts (5)
+      selfem_partner == 1 & isco_partner >= 2100 & isco_partner <= 2162 ~5,
+      selfem_partner == 1 & isco_partner >= 2164 & isco_partner <= 2165 ~5,
+      selfem_partner == 1 & isco_partner >= 2500 & isco_partner <= 2529 ~5,
+      
+      # Technicians (6)
+      selfem_partner == 1 & isco_partner >= 3100 & isco_partner <= 3155 ~ 6,
+      selfem_partner == 1 & isco_partner >= 3210 & isco_partner <= 3214 ~ 6,
+      selfem_partner == 1 & isco_partner == 3252 ~ 6,
+      selfem_partner == 1 & isco_partner >= 3500 & isco_partner <= 3522 ~ 6,
+      
+      # Skilled manual (7)
+      selfem_partner == 1 & isco_partner >= 6000 & isco_partner <= 7549 ~ 7,
+      selfem_partner == 1 & isco_partner >= 8310 & isco_partner <= 8312 ~ 7,
+      selfem_partner == 1 & isco_partner == 8330 ~ 7,
+      selfem_partner == 1 & isco_partner >= 8332 & isco_partner <= 8340 ~ 7,
+      selfem_partner == 1 & isco_partner >= 8342 & isco_partner <= 8344 ~ 7,
+      
+      # Low-skilled manual (8)
+      selfem_partner == 1 & isco_partner >= 8000 & isco_partner <= 8300 ~ 8,
+      selfem_partner == 1 & isco_partner >= 8320 & isco_partner <= 8321 ~ 8,
+      selfem_partner == 1 & isco_partner == 8341 ~ 8,
+      selfem_partner == 1 & isco_partner == 8350 ~ 8,
+      selfem_partner == 1 & isco_partner >= 9200 & isco_partner <= 9334 ~ 8,
+      selfem_partner == 1 & isco_partner >= 9600 & isco_partner <= 9620 ~ 8,
+      selfem_partner == 1 & isco_partner >= 9622 & isco_partner <= 9629 ~ 8,
+      
+      # Higher-grade managers and administrators (9)
+      selfem_partner == 1 & isco_partner >= 1000 & isco_partner <= 1300 ~ 9,
+      selfem_partner == 1 & isco_partner >= 1320 & isco_partner <= 1349 ~ 9,
+      selfem_partner == 1 & isco_partner >= 2400 & isco_partner <= 2432 ~ 9,
+      selfem_partner == 1 & isco_partner >= 2610 & isco_partner <= 2619 ~ 9,
+      selfem_partner == 1 & isco_partner == 2631 ~ 9,
+      selfem_partner == 1 & isco_partner >= 100 & isco_partner <= 110 ~ 9,
+      
+      # Lower-grade managers and administrators (10)
+      selfem_partner == 1 & isco_partner >= 1310 & isco_partner <= 1312 ~10,
+      selfem_partner == 1 & isco_partner >= 1400 & isco_partner <= 1439 ~10,
+      selfem_partner == 1 & isco_partner >= 2433 & isco_partner <= 2434 ~10,
+      selfem_partner == 1 & isco_partner >= 3300 & isco_partner <= 3339 ~10,
+      selfem_partner == 1 & isco_partner == 3343 ~ 10,
+      selfem_partner == 1 & isco_partner >= 3350 & isco_partner <= 3359 ~ 10,
+      selfem_partner == 1 & isco_partner == 3411 ~ 10,
+      selfem_partner == 1 & isco_partner == 5221 ~ 10,
+      selfem_partner == 1 & isco_partner >= 200 & isco_partner <= 210 ~ 10,
+      
+      # Skilled clerks (11)
+      selfem_partner == 1 & isco_partner >= 3340 & isco_partner <= 3342 ~ 11,
+      selfem_partner == 1 & isco_partner == 3344 ~ 11,
+      selfem_partner == 1 & isco_partner >= 4000 & isco_partner <= 4131 ~ 11,
+      selfem_partner == 1 & isco_partner >= 4200 & isco_partner <= 4221 ~ 11,
+      selfem_partner == 1 & isco_partner >= 4224 & isco_partner <= 4413 ~ 11,
+      selfem_partner == 1 & isco_partner >= 4415 & isco_partner <= 4419 ~ 11,
+      
+      # Unskilled clerks (12)
+      selfem_partner == 1 & isco_partner == 4132 ~ 12,
+      selfem_partner == 1 & isco_partner == 4222 ~ 12,
+      selfem_partner == 1 & isco_partner == 4223 ~ 12,
+      selfem_partner == 1 & isco_partner == 5230 ~ 12,
+      selfem_partner == 1 & isco_partner == 9621 ~ 12,
+      
+      # Socio-cultural professionals (13)
+      selfem_partner == 1 & isco_partner >= 2200 & isco_partner <= 2212 ~ 13,
+      selfem_partner == 1 & isco_partner == 2250 ~ 13,
+      selfem_partner == 1 & isco_partner >= 2261 & isco_partner <= 2262 ~ 13,
+      selfem_partner == 1 & isco_partner >= 2300 & isco_partner <= 2330 ~ 13,
+      selfem_partner == 1 & isco_partner >= 2350 & isco_partner <= 2352 ~ 13,
+      selfem_partner == 1 & isco_partner == 2359 ~ 13,
+      selfem_partner == 1 & isco_partner == 2600 ~ 13,
+      selfem_partner == 1 & isco_partner == 2621 ~ 13,
+      selfem_partner == 1 & isco_partner == 2630 ~ 13,
+      selfem_partner == 1 & isco_partner >= 2632 & isco_partner <= 2634 ~ 13,
+      selfem_partner == 1 & isco_partner >= 2636 & isco_partner <= 2640 ~ 13,
+      selfem_partner == 1 & isco_partner >= 2642 & isco_partner <= 2643 ~ 13,
+      
+      # Socio-cultural semi-professionals (14)
+      selfem_partner == 1 & isco_partner == 2163 ~ 14,
+      selfem_partner == 1 & isco_partner == 2166 ~ 14,
+      selfem_partner == 1 & isco_partner >= 2220 & isco_partner <= 2240 ~14,
+      selfem_partner == 1 & isco_partner == 2260 ~ 14,
+      selfem_partner == 1 & isco_partner >= 2263 & isco_partner <= 2269 ~ 14,
+      selfem_partner == 1 & isco_partner >= 2340 & isco_partner <= 2342 ~ 14,
+      selfem_partner == 1 & isco_partner >= 2353 & isco_partner <= 2356 ~ 14,
+      selfem_partner == 1 & isco_partner == 2620 ~ 14,
+      selfem_partner == 1 & isco_partner == 2622 ~ 14,
+      selfem_partner == 1 & isco_partner == 2635 ~ 14,
+      selfem_partner == 1 & isco_partner == 2641 ~ 14,
+      selfem_partner == 1 & isco_partner >= 2650 & isco_partner <= 2659 ~ 14,
+      selfem_partner == 1 & isco_partner == 3200 ~ 14,
+      selfem_partner == 1 & isco_partner >= 3220 & isco_partner <= 3230 ~ 14,
+      selfem_partner == 1 & isco_partner == 3250 ~ 14,
+      selfem_partner == 1 & isco_partner >= 3253 & isco_partner <= 3257 ~ 14,
+      selfem_partner == 1 & isco_partner == 3259 ~ 14,
+      selfem_partner == 1 & isco_partner >= 3400 & isco_partner <= 3410 ~ 14,
+      selfem_partner == 1 & isco_partner >= 3412 & isco_partner <= 3413 ~ 14,
+      selfem_partner == 1 & isco_partner >= 3430 & isco_partner <= 3433 ~ 14,
+      selfem_partner == 1 & isco_partner == 3435 ~ 14,
+      selfem_partner == 1 & isco_partner == 4414 ~ 14,
+      
+      # Skilled service (15)
+      selfem_partner == 1 & isco_partner == 3240 ~ 15,
+      selfem_partner == 1 & isco_partner == 3251 ~ 15,
+      selfem_partner == 1 & isco_partner == 3258 ~ 15,
+      selfem_partner == 1 & isco_partner >= 3420 & isco_partner <= 3423 ~ 15,
+      selfem_partner == 1 & isco_partner == 3434 ~ 15,
+      selfem_partner == 1 & isco_partner >= 5000 & isco_partner <= 5120 ~ 15,
+      selfem_partner == 1 & isco_partner >= 5140 & isco_partner <= 5142 ~ 15,
+      selfem_partner == 1 & isco_partner == 5163 ~ 15,
+      selfem_partner == 1 & isco_partner == 5165 ~ 15,
+      selfem_partner == 1 & isco_partner == 5200 ~ 15,
+      selfem_partner == 1 & isco_partner == 5220 ~ 15,
+      selfem_partner == 1 & isco_partner >= 5222 & isco_partner <= 5223 ~ 15,
+      selfem_partner == 1 & isco_partner >= 5241 & isco_partner <= 5242 ~ 15,
+      selfem_partner == 1 & isco_partner >= 5300 & isco_partner <= 5321 ~ 15,
+      selfem_partner == 1 & isco_partner >= 5400 & isco_partner <= 5413 ~ 15,
+      selfem_partner == 1 & isco_partner == 5419 ~ 15,
+      selfem_partner == 1 & isco_partner == 8331 ~ 15,
+      
+      # Low-skilled service (16)
+      selfem_partner == 1 & isco_partner >= 5130 & isco_partner <= 5132 ~ 16,
+      selfem_partner == 1 & isco_partner >= 5150 & isco_partner <= 5162 ~ 16,
+      selfem_partner == 1 & isco_partner == 5164 ~ 16,
+      selfem_partner == 1 & isco_partner == 5169 ~ 16,
+      selfem_partner == 1 & isco_partner >= 5210 & isco_partner <= 5212 ~ 16,
+      selfem_partner == 1 & isco_partner == 5240 ~ 16,
+      selfem_partner == 1 & isco_partner >= 5243 & isco_partner <= 5249 ~ 16,
+      selfem_partner == 1 & isco_partner >= 5322 & isco_partner <= 5329 ~ 16,
+      selfem_partner == 1 & isco_partner == 5414 ~ 16,
+      selfem_partner == 1 & isco_partner == 8322 ~ 16,
+      selfem_partner == 1 & isco_partner >= 9100 & isco_partner <= 9129 ~ 16,
+      selfem_partner == 1 & isco_partner >= 9400 & isco_partner <= 9520 ~ 16),
+    
+    class16 = ifelse(!is.na(class16_r), class16_r, class16_p),
+    
+    # Class 16
+    class16fac = case_when(
+      class16 == 1 ~ "Large employers",
+      class16 == 2 ~ "Self-employed professionals",
+      class16 == 3 ~ "Small business with employees",
+      class16 == 4 ~ "Small business w/o employees",
+      class16 == 5 ~ "Technical experts",
+      class16 == 6 ~ "Technicians",
+      class16 == 7 ~ "Skilled manual",
+      class16 == 8 ~ "Low-skilled manual",
+      class16 == 9 ~ "Higher-grade employee",
+      class16 == 10 ~ "Lower-grade employee",
+      class16 == 11 ~ "Skilled clerks",
+      class16 == 12 ~ "Unskilled clerks",
+      class16 == 13 ~ "Socio-cultural professionals",
+      class16 == 14 ~ "Socio-cultural semi-professionals",
+      class16 == 15 ~ "Skilled service",
+      class16 == 16 ~ "Low-skilled service"),
+    
+    # Class 8
+    class8 = case_when(
+      class16 <= 2 ~1,
+      class16 == 3 | class16 == 4 ~ 2,
+      class16 == 5 | class16 == 6 ~ 3,
+      class16 == 7 | class16 == 8 ~ 4,
+      class16 == 9 | class16 == 10 ~ 5,
+      class16 == 11 | class16 == 12 ~ 6,
+      class16 == 13 | class16 == 14 ~ 7,
+      class16 == 15 | class16 == 16 ~ 8),
+    class8fac = case_when(
+      class8 == 1 ~ "Self-employed professionals and large employers",
+      class8 == 2 ~ "Small business owners",
+      class8 == 3 ~ "Technical (semi-)professionals",
+      class8 == 4 ~ "Production workers",
+      class8 == 5 ~ "(Associate) managers",
+      class8 == 6 ~ "Clerks",
+      class8 == 7 ~ "Socio-cultural (semi-)professionals",
+      class8 == 8 ~ "Service workers"),
+    class8fac = factor(class8fac),  
+    
+    # Class 5
+    class5 = case_when(
+      class16 <= 2 | class16 == 5 | class16 == 9 | class16 == 13 ~ 1,
+      class16 == 6 | class16 == 10 | class16 == 14 ~ 2,
+      class16 == 3 | class16 == 4 ~ 3,
+      class16 == 7 | class16 == 11 | class16 == 15 ~4,
+      class16 == 8 | class16 == 12 | class16 == 16 ~5),
+    class5fac = case_when(
+      class5 == 1 ~ "Higher-grade service class",
+      class5 == 2 ~ "Lower-grade service class",
+      class5 == 3 ~ "Small business",
+      class5 == 4 ~ "Skilled workers",
+      class5 == 5 ~ "Low-skilled workers"),
+    class5fac = factor(class5fac),
+
+    election = case_when(
+      essround == 1 ~ 1998,
+      essround == 2 ~ 2002,
+      essround == 3 ~ 2005,
+      essround == 4 ~ 2005,
+      essround == 5 ~ 2009,
+      essround == 6 ~ 2009,
+      essround == 7 ~ 2013,
+      essround == 8 ~ 2013,
+      essround == 9 ~ 2017,
+      essround == 10~ 2017),
+    
+    worklogic = case_when(
+      class16 == 1 | class16 == 2 | class16 == 3 | class16 == 4 ~ "independent",
+      class16 == 5 | class16 == 6 | class16 == 7 | class16 == 8 ~ "technical",
+      class16 == 9 | class16 == 10 | class16 == 11 | class16 == 12 ~ "organizational",
+      class16 == 13 | class16 == 14 | class16 == 15 | class16 == 16 ~ "interpersonal") ) %>% 
+  select(essround, idno, starts_with("class"))
+
+saveRDS(ess_class_scheme, here("data", "processed", "ess_class_scheme.rds"))
+
+
+```
+

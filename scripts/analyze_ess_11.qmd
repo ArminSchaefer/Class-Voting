@@ -1,0 +1,2374 @@
+---
+title: "Voting for the Radical Right among Workers"
+subtitle: "ESS Round 11 — Bayesian analysis with survey weights"
+author:
+  - name: Armin Schäfer
+    affiliation:
+      - id: jgu
+        name: Johannes Gutenberg University Mainz
+format:
+  html:
+    number-sections: true
+    code-fold: true
+    code-summary: "Show the code"
+    self-contained: true
+    toc: true
+execute:
+  warning: false
+  message: false
+---
+
+# Purpose and modelling strategy
+
+This document estimates two closely related quantities:
+
+1. **Loyalty:**
+$$
+   P(\text{radical right}\mid\text{worker})
+$$
+2. **Contribution:**
+$$
+\begin{aligned}
+   P(\text{worker}\mid\text{radical right}).
+\end{aligned}
+$$
+
+These are different conditional probabilities. They should not be treated as interchangeable. They are linked by the same underlying $2\times2$ table, so the preferred strategy is to estimate the table-generating probabilities jointly and derive both quantities from the same posterior draws.
+
+The analysis proceeds from simple to more complex models:
+
+- **Model 0:** pooled logistic model, radical-right vote predicted by worker status.
+- **Model 1:** varying country intercepts.
+- **Model 2:** varying country intercepts and worker slopes.
+- **Model 3:** add individual-level covariates.
+- **Model 4:** add theoretically motivated interactions with worker status.
+
+The primary analysis uses the ESS **analysis weight (`anweight`)**. The ESS recommends `anweight` as the default weight for ESS analyses. It combines the post-stratification weight with the population-size adjustment and is therefore appropriate when several countries are pooled. `pspwght` is appropriate for single-country analyses and cross-country comparisons without treating the countries as one population. The present analysis pools ten countries, so `anweight` is the natural default. [ESS weighting guidance](https://www.europeansocialsurvey.org/methodology/ess-methodology/data-processing-and-archiving/weighting).
+
+A crucial qualification is that `brms::weights()` implements **likelihood weighting**: internally, each observation's log-posterior contribution is multiplied by its weight. It is therefore a weighted Bayesian pseudo-likelihood, not a full Bayesian treatment of the ESS's multistage sampling design. In particular, the posterior intervals should not automatically be interpreted as design-based survey uncertainty. The weights are used here to target the population represented by the ESS rather than to claim a complete design-based variance estimator. See the [brms documentation](https://paulbuerkner.com/brms/reference/brmsformula.html).
+
+## Why use weights at all?
+
+For these data, the answer is **yes** if the estimand is a population quantity rather than simply a description of the realized ESS respondents. The ESS explicitly recommends using weights for ESS analyses because respondents have unequal selection probabilities and because nonresponse, noncoverage, post-stratification, and differences in country population size affect representativeness. [ESS weighting guidance](https://www.europeansocialsurvey.org/sites/default/files/2023-06/ESS_weighting_data_1_1.pdf).
+
+There are two separate questions:
+
+- **Target population:** Who should the observations represent? For a pooled analysis of all ten countries as one population, `anweight` is appropriate.
+- **Uncertainty:** How should sampling uncertainty be represented? `brms::weights()` does not reproduce the full ESS complex-sample variance calculation. This is why the analysis should be described as a weighted Bayesian pseudo-likelihood and why sensitivity checks against unweighted models are useful.
+
+The weights should therefore not be regarded as an optional device for making the model fit better. They define the population to which the descriptive and substantive quantities refer.
+
+# Setup
+
+```{r}
+#| label: setup
+#| echo: false
+#| message: false
+#| warning: false
+
+if (!require("pacman")) {
+  install.packages("pacman")
+  library(pacman)
+}
+
+p_load(
+  here, rio, tidyverse, brms, tidybayes, ggdist, posterior,
+  bayesplot, tinytable, marginaleffects, modelsummary
+)
+
+options(
+  dplyr.summarise.inform = FALSE,
+  mc.cores = parallel::detectCores()
+)
+
+my_theme <- function(...) {
+  theme(
+    plot.title = element_text(color = "black", size = 12, face = "bold"),
+    axis.text = element_text(color = "black", size = 10),
+    axis.title = element_text(color = "black", face = "bold", size = 10),
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "white", color = "grey70"),
+    strip.text = element_text(color = "black"),
+    legend.key.size = unit(0.3, "cm")
+  )
+}
+
+set.seed(2026)
+
+source(here("scripts", "_common.R"))
+
+```
+
+# Data and variable construction
+
+```{r}
+#| label: load-data
+
+ess <- import(here("data", "processed", "ess_short_1_11.rds"), trust = TRUE)
+
+countries <- c("BE", "CH", "DE", "ES", "FI", "FR", "NL", "NO", "PT", "SE")
+
+# ESS Round 11 only. Round 10 was temporarily included in an earlier
+# version of the analysis for diagnostic purposes, but is not part of this study.
+ess11 <- ess |>
+  filter(
+    essround == 11,
+    cntry %in% countries
+  ) |>
+  mutate(
+    cntry = droplevels(factor(cntry)),
+
+    socialist = case_when(
+      vote_fct %in% c("Communist/Socialist", "Social democracy") ~ 1,
+      vote_fct %in% c(
+        "Agrarian", "Conservative/Christian democracy", "Green",
+        "Liberal", "Radical right"
+      ) ~ 0
+    ),
+
+    radicalright = case_when(
+      vote_fct == "Radical right" ~ 1,
+      vote_fct %in% c(
+        "Agrarian", "Communist/Socialist",
+        "Conservative/Christian democracy", "Green", "Liberal",
+        "Social democracy"
+      ) ~ 0
+    ),
+
+    worker = case_when(
+      class5fac %in% c("Low-skilled workers", "Skilled workers") ~ 1,
+      class5fac %in% c(
+        "Small business", "Lower-grade service class",
+        "Higher-grade service class"
+      ) ~ 0
+    )
+  )
+
+ess11 <- ess11 |> 
+  select(essround, cntry, age_grp_fct, class5fac, worker, 
+        socialist, radicalright, married, gndr_fct, immigrant, pspwght, pweight) |> 
+  drop_na()
+
+# Round 11 should contain the ESS analysis weight. If the processed file
+# does not contain anweight, construct it from pspwght * pweight.
+if ("anweight" %in% names(ess11)) {
+  ess11 <- ess11 |>
+    mutate(weight_an = anweight)
+} else {
+  ess11 <- ess11 |>
+    mutate(weight_an = pspwght * pweight)
+}
+
+# Check the basic structure before estimation.
+ess11 |>
+  count(cntry) |> 
+  tt()
+
+ess11 |>
+  summarise(
+    n = n(),
+    n_missing_weight = sum(is.na(weight_an)),
+    min_weight = min(weight_an, na.rm = TRUE),
+    max_weight = max(weight_an, na.rm = TRUE),
+    mean_weight = mean(weight_an, na.rm = TRUE)
+  ) |> 
+  tt()
+
+```
+
+## Descriptive statistics of variables
+
+```{r}
+#| label: model-3-descriptives
+
+vars <- c(
+  "radicalright",
+  "socialist",
+  "worker",
+  "age_grp_fct",
+  "gndr_fct",
+  "married",
+  "immigrant"
+)
+
+datasummary_skim(
+  ess11[, vars],
+  output = "tinytable",
+  histogram = FALSE
+)
+
+```
+## Construct the analysis sample
+
+The main outcome is whether the respondent voted for a radical-right party among respondents for whom both vote choice and the worker/non-worker classification are observed.
+
+```{r}
+#| label: analysis-sample
+
+voters <- ess11 |>
+  filter(
+    !is.na(radicalright),
+    !is.na(worker),
+    !is.na(weight_an),
+    weight_an > 0
+  ) |>
+  mutate(
+    # Mean-one rescaling keeps the relative survey weights intact while
+    # avoiding an arbitrary multiplication of the likelihood by a large constant.
+    w = weight_an / mean(weight_an)
+  )
+
+voters |>
+  summarise(
+    n = n(),
+    n_eff = sum(weight_an)^2 / sum(weight_an^2),
+    mean_w = mean(w),
+    min_w = min(w),
+    max_w = max(w)
+  ) |> 
+  tt()
+
+voters |>
+  summarise(
+    n = n(),
+    complete_m3 = sum(
+      complete.cases(
+        socialist,
+        radicalright,
+        worker,
+        age_grp_fct,
+        gndr_fct,
+        married,
+        immigrant
+      )
+    )
+  ) |> 
+  tt()
+
+```
+
+## A note on weight rescaling
+
+The mean-one rescaling above is a modelling convention, not an ESS weighting convention. Multiplying all likelihood weights by a constant changes the amount of information supplied to a Bayesian pseudo-likelihood. Rescaling to mean one therefore makes the effective likelihood scale correspond roughly to the unweighted sample size while preserving the relative weights.
+
+The Kish effective sample size is reported only as a diagnostic:
+
+$$
+N_{\mathrm{eff}} = \frac{(\sum_i w_i)^2}{\sum_i w_i^2}.
+$$
+
+It should **not** be used as the likelihood weight itself.
+
+# Descriptive benchmark
+
+Before fitting any model, calculate the two quantities directly from the weighted data. These provide a benchmark against which the posterior estimates can be checked.
+
+```{r}
+#| label: descriptive-benchmark
+
+weighted_share <- function(x, w) {
+  ok <- !is.na(x) & !is.na(w)
+  weighted.mean(x[ok], w[ok])
+}
+
+# P(RR | worker), P(RR | non-worker), P(worker), and P(worker | RR)
+benchmark <- voters |>
+  summarise(
+    p_rr_worker = weighted.mean(radicalright[worker == 1],
+                                weight_an[worker == 1], na.rm = TRUE),
+    p_rr_nonworker = weighted.mean(radicalright[worker == 0],
+                                   weight_an[worker == 0], na.rm = TRUE),
+    p_worker = weighted.mean(worker, weight_an, na.rm = TRUE),
+    p_worker_rr = weighted.mean(worker[radicalright == 1],
+                                weight_an[radicalright == 1], na.rm = TRUE)
+  )
+
+benchmark |> 
+  tt()
+```
+
+## Country-specific descriptive estimates
+
+```{r}
+#| label: country-benchmark
+
+country_benchmark <- voters |>
+  group_by(cntry) |>
+  summarise(
+    p_rr_worker = weighted.mean(radicalright[worker == 1],
+                                weight_an[worker == 1], na.rm = TRUE),
+    p_rr_nonworker = weighted.mean(radicalright[worker == 0],
+                                   weight_an[worker == 0], na.rm = TRUE),
+    p_worker = weighted.mean(worker, weight_an, na.rm = TRUE),
+    p_worker_rr = weighted.mean(worker[radicalright == 1],
+                                weight_an[radicalright == 1], na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  ) |>
+  mutate(
+    class_gap = p_rr_worker - p_rr_nonworker
+  )
+
+country_benchmark |> 
+  tt()
+
+```
+
+# Model 0: pooled Bayesian model
+
+The simplest useful model is:
+
+$$
+R_i \sim \operatorname{Bernoulli}(p_i)
+$$
+
+$$
+\operatorname{logit}(p_i)=\alpha+\beta W_i.
+$$
+
+This one model estimates both conditional radical-right probabilities:
+
+$$
+P(RR\mid W=0)=\operatorname{logit}^{-1}(\alpha)
+$$
+
+and
+
+$$
+P(RR\mid W=1)=\operatorname{logit}^{-1}(\alpha+\beta).
+$$
+
+The contribution quantity is then derived by combining these probabilities with the weighted worker prevalence:
+
+$$
+P(W\mid RR)=
+\frac{P(RR\mid W)P(W)}
+{P(RR\mid W)P(W)+P(RR\mid \neg W)P(\neg W)}.
+$$
+
+This is preferable to fitting a completely separate model for `P(worker | radical right)` because both quantities describe the same underlying contingency table.
+
+## Priors
+
+The priors below are deliberately weakly informative rather than flat. A normal prior of `normal(-2, 1)` on the intercept puts substantial prior mass on relatively low baseline probabilities of radical-right voting while still allowing much higher probabilities. The worker coefficient has a symmetric prior because the direction of the association is not imposed by the prior.
+
+```{r}
+#| label: pooled-priors
+
+pri_m0 <- c(
+  prior(normal(-2, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "worker")
+)
+```
+
+## Fit the pooled weighted model
+
+```{r}
+#| label: pooled-model
+
+m0 <- brm(
+  radicalright | weights(w) ~ worker,
+  data = voters,
+  family = bernoulli(),
+  prior = pri_m0,
+  backend = "cmdstanr",
+  threads = threading(4),
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  seed = 2026,
+  control = list(adapt_delta = 0.95),
+  file = here("models", "ess11_m0")
+)
+
+summary(m0)
+```
+
+## Derive loyalty and contribution from the posterior
+
+We estimate `P(worker)` with a separate intercept-only weighted model. This is not a second model for contribution: it supplies the marginal worker prevalence needed to transform the conditional radical-right probabilities into `P(worker | radical right)`.
+
+```{r}
+#| label: worker-prevalence-model
+
+m_worker <- brm(
+  worker | weights(w) ~ 1,
+  data = voters,
+  family = bernoulli(),
+  prior = prior(normal(0, 1), class = "Intercept"),
+  backend = "cmdstanr",
+  threads = threading(4),
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  seed = 2026,
+  control = list(adapt_delta = 0.95),
+  file = here("models", "ess11_m_worker")
+)
+
+post_m0 <- as_draws_df(m0) |>
+  as_tibble() |>
+  select(.draw, alpha = b_Intercept, beta = b_worker) |>
+  inner_join(
+    as_draws_df(m_worker) |>
+      as_tibble() |>
+      select(.draw, gamma = b_Intercept),
+    by = ".draw"
+  ) |>
+  mutate(
+    p_rr_worker = plogis(alpha + beta),
+    p_rr_nonworker = plogis(alpha),
+    p_worker = plogis(gamma),
+    p_rr = p_rr_worker * p_worker +
+      p_rr_nonworker * (1 - p_worker),
+    p_worker_rr = p_rr_worker * p_worker / p_rr,
+    class_gap = p_rr_worker - p_rr_nonworker
+  )
+
+post_m0 |>
+  select(.draw, p_rr_worker, p_rr_nonworker, p_worker,
+         p_rr, p_worker_rr, class_gap) |>
+  pivot_longer(-.draw, names_to = "quantity", values_to = "value") |>
+  group_by(quantity) |>
+  median_qi(value, .width = c(.8, .95)) |> 
+  tt()
+
+```
+
+## Posterior versus descriptive benchmark
+
+```{r}
+#| label: benchmark-comparison
+
+posterior_summary <- post_m0 |>
+  summarise(
+    p_rr_worker = median(p_rr_worker),
+    p_rr_nonworker = median(p_rr_nonworker),
+    p_worker = median(p_worker),
+    p_worker_rr = median(p_worker_rr),
+    class_gap = median(class_gap)
+  )
+
+bind_rows(
+  benchmark |> mutate(source = "Weighted descriptive estimate"),
+  posterior_summary |> mutate(source = "Posterior median")
+) |>
+  relocate(source) |> 
+  tt()
+
+```
+
+# Model 1: country-varying intercepts
+
+The next question is whether countries differ in their baseline propensity to vote for the radical right. The worker effect is initially assumed to be common across countries:
+
+$$
+\operatorname{logit}(p_{ic})=\alpha_c+\beta W_{ic}.
+$$
+
+```{r}
+#| label: model-1
+
+pri_m1 <- c(
+  prior(normal(-2, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "worker"),
+  prior(exponential(1), class = "sd")
+)
+
+m1 <- brm(
+  radicalright | weights(w) ~ worker + (1 | cntry),
+  data = voters,
+  family = bernoulli(),
+  prior = pri_m1,
+  backend = "cmdstanr",
+  threads = threading(4),
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  seed = 2026,
+  control = list(adapt_delta = 0.95),
+  file = here("models", "ess11_m1")
+)
+
+summary(m1)
+```
+
+# Model 2: country-varying worker effects
+
+The key substantive model allows the worker association itself to vary across countries:
+
+$$
+\operatorname{logit}(p_{ic})=\alpha_c+\beta_c W_{ic}.
+$$
+
+The country-specific intercepts and slopes are given a joint multivariate normal distribution. This partial-pooling structure is preferable to estimating ten completely separate regressions because countries with smaller effective samples borrow information from the others.
+
+```{r}
+#| label: model-2
+
+pri_m2 <- c(
+  prior(normal(-2, 1), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "worker"),
+  prior(exponential(1), class = "sd"),
+  prior(lkj(2), class = "cor")
+)
+
+m2 <- brm(
+  radicalright | weights(w) ~ worker + (1 + worker | cntry),
+  data = voters,
+  family = bernoulli(),
+  prior = pri_m2,
+  backend = "cmdstanr",
+  threads = threading(4),
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  seed = 2026,
+  control = list(adapt_delta = 0.95),
+  file = here("models", "ess11_m2")
+)
+
+summary(m2)
+
+```
+
+## Posterior predictive check (PPC).
+
+```{r}
+
+pp_check(m2, type = "bars")
+
+```
+
+# Posterior predictions from Model 2
+
+The main substantive quantities are easier to interpret on the probability scale than the log-odds coefficient. We therefore calculate, for each country:
+
+- `P(RR | worker)`
+- `P(RR | non-worker)`
+- the absolute worker/non-worker gap.
+
+```{r}
+#| label: model-2-predictions
+
+nd <- expand_grid(
+  cntry = levels(voters$cntry),
+  worker = c(0, 1)
+)
+
+epred_m2 <- m2 |>
+  epred_draws(
+    newdata = nd,
+    re_formula = NULL
+  ) |>
+  ungroup() |>
+  select(cntry, worker, .draw, .epred)
+
+gap_m2 <- epred_m2 |>
+  pivot_wider(
+    names_from = worker,
+    values_from = .epred,
+    names_prefix = "worker_"
+  ) |>
+  mutate(
+    class_gap = worker_1 - worker_0
+  )
+
+# Posterior summary of the three central quantities.
+gap_m2 |>
+  pivot_longer(
+    cols = c(worker_1, worker_0, class_gap),
+    names_to = "quantity",
+    values_to = "value"
+  ) |>
+  group_by(cntry, quantity) |>
+  median_qi(value, .width = c(.8, .95)) |> 
+  tt()
+
+```
+
+## Plot: loyalty by country
+
+```{r}
+#| label: plot-loyalty
+
+ord <- epred_m2 |>
+  filter(worker == 1) |>
+  group_by(cntry) |>
+  summarise(m = median(.epred)) |>
+  arrange(m) |>
+  pull(cntry)
+
+epred_m2 |>
+  filter(worker == 1) |>
+  mutate(cntry = factor(cntry, levels = ord)) |>
+  ggplot(aes(x = .epred, y = cntry)) +
+  stat_halfeye(.width = c(.8, .95),
+   fill = "grey80",
+   color = "grey40") +
+  scale_x_continuous(limits = c(0, .5)) +
+  labs(
+    x = "P(radical right | worker)",
+    y = NULL,
+    caption = "Posterior median with 80% and 95% credible intervals"
+  )
+
+ggsave(here("figs", "loyalty_worker_rr_countries.png"),
+      width = 10, height = 7, dpi = 300,
+      bg = "white")
+
+```
+
+## Plot: class gap
+
+```{r}
+#| label: plot-gap
+
+gap_order <- gap_m2 |>
+  group_by(cntry) |>
+  summarise(m = median(class_gap)) |>
+  arrange(m) |>
+  pull(cntry)
+
+gap_m2 |>
+  mutate(cntry = factor(cntry, levels = gap_order)) |>
+  ggplot(aes(x = class_gap, y = cntry)) +
+  stat_halfeye(.width = c(.80, .95), 
+  point_interval = median_qi, 
+   fill  = "grey80",
+   color = "grey40") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  scale_x_continuous() +
+  labs(
+    x = "P(RR | worker) − P(RR | non-worker)",
+    y = NULL,
+    caption = "Posterior median with 80% and 95% credible intervals")
+
+ggsave(here("figs", "loyalty_classgap_rr_countries.png"),
+      width = 10, height = 7, dpi = 300,
+      bg = "white")
+
+```
+
+# Deriving contribution by country
+
+The contribution quantity can be derived from the country-specific posterior predictions once we also estimate the country-specific prevalence of workers.
+
+The identity is:
+
+$$
+P(W\mid RR,c)=
+\frac{P(RR\mid W,c)P(W\mid c)}
+{P(RR\mid W,c)P(W\mid c)+P(RR\mid \neg W,c)[1-P(W\mid c)]}.
+$$
+
+Rather than fitting a separate radical-right-only model for every country, estimate `P(worker | country)` with a hierarchical intercept model and combine the posterior predictions draw by draw.
+
+```{r}
+#| label: contribution-country
+#| message: false
+#| results: hide
+
+m_worker_country <- brm(
+  worker | weights(w) ~ 1 + (1 | cntry),
+  data = voters,
+  family = bernoulli(),
+  prior = c(
+    prior(normal(0, 1), class = "Intercept"),
+    prior(exponential(1), class = "sd")
+  ),
+  backend = "cmdstanr",
+  threads = threading(4),
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  seed = 2026,
+  control = list(adapt_delta = 0.95),
+  file = here("models", "ess11_m_worker_country")
+)
+
+worker_country <- m_worker_country |>
+  epred_draws(newdata = distinct(voters, cntry), re_formula = NULL) |>
+  ungroup() |>
+  select(cntry, .draw, p_worker = .epred)
+
+# Combine country-specific P(RR | worker), P(RR | non-worker), and P(worker).
+contribution_country <- gap_m2 |>
+  rename(
+    p_rr_nonworker = worker_0,
+    p_rr_worker = worker_1
+  ) |>
+  inner_join(worker_country, by = c("cntry", ".draw")) |>
+  mutate(
+    p_rr = p_rr_worker * p_worker +
+      p_rr_nonworker * (1 - p_worker),
+    p_worker_rr = p_rr_worker * p_worker / p_rr
+  )
+
+contribution_country |>
+  group_by(cntry) |>
+  summarise(
+    across(
+      c(p_rr_worker, p_rr_nonworker, p_worker, p_worker_rr),
+      list(median = median, lower = ~quantile(.x, .025), upper = ~quantile(.x, .975)),
+      .names = "{.col}_{.fn}"
+    )
+  ) |> 
+tt()
+
+```
+
+## Plot of estimated contribution per country
+
+The contribution estimate is the posterior probability that a voter is a worker, conditional on voting for the radical right. We plot the full country-specific posterior distribution, with countries ordered by their posterior median.
+
+```{r}
+#| label: plot-contribution-country
+
+contribution_order <- contribution_country |>
+  group_by(cntry) |>
+  summarise(m = median(p_worker_rr)) |>
+  arrange(m) |>
+  pull(cntry)
+
+contribution_country |>
+  mutate(cntry = factor(cntry, levels = contribution_order)) |>
+  ggplot(aes(x = p_worker_rr, y = cntry)) +
+  stat_halfeye(
+    point_interval = median_qi,
+    .width = c(.80, .95),
+    fill = "grey80",
+    color = "grey40"
+  ) +
+  scale_x_continuous() +
+  labs(
+    x = "P(worker | radical right)",
+    y = NULL,
+    caption = "Posterior median with 80% and 95% credible intervals"
+  )
+
+ggsave(
+  here("figs", "contribution_worker_rr_countries.png"),
+  width = 10,
+  height = 7,
+  dpi = 300,
+  bg = "white"
+)
+```
+
+# Posterior predictive checks
+
+Posterior predictive checks are used to ask whether the models can reproduce important features of the observed data. Because the pooled model ignores country heterogeneity, country-specific checks are particularly useful for deciding whether Model 1 and Model 2 are warranted.
+
+```{r}
+#| label: pp-check-country
+
+set.seed(2026)
+
+# For large weighted samples, use a moderate number of posterior draws.
+yrep <- posterior_predict(m0, ndraws = 300)
+
+rep_means <- map_dfr(levels(voters$cntry), function(cc) {
+  idx <- voters$cntry == cc
+  tibble(
+    cntry = cc,
+    .draw = seq_len(nrow(yrep)),
+    rep_mean = rowMeans(yrep[, idx, drop = FALSE])
+  )
+})
+
+obs_means <- voters |>
+  group_by(cntry) |>
+  summarise(
+    obs_mean = weighted.mean(radicalright, weight_an, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+ggplot(rep_means, aes(rep_mean)) +
+  geom_histogram(bins = 30) +
+  geom_vline(
+    data = obs_means,
+    aes(xintercept = obs_mean),
+    linewidth = 0.8
+  ) +
+  facet_wrap(~ cntry, scales = "free_x") +
+  labs(
+    x = "Mean radical-right vote in replicated data",
+    y = NULL,
+    title = "Pooled model: country-specific posterior predictive check",
+    subtitle = "Vertical lines show weighted observed country means"
+  )
+
+```
+
+# Prior predictive check
+
+Before interpreting the fitted models, it is useful to check whether the priors imply plausible radical-right voting probabilities. This is especially important because a logistic intercept prior translates nonlinearly into the probability scale.
+
+```{r}
+#| label: prior-predictive
+#| message: false
+#| results: hide
+
+m0_prior <- brm(
+  radicalright ~ worker,
+  data = voters,
+  family = bernoulli(),
+  prior = pri_m0,
+  sample_prior = "only",
+  backend = "cmdstanr",
+  threads = threading(4),
+  chains = 4,
+  cores = 4,
+  iter = 1000,
+  warmup = 500,
+  seed = 2026,
+  file = here("models", "ess11_m0_prior")
+)
+
+prior_epred <- m0_prior |>
+  epred_draws(
+    newdata = tibble(worker = c(0, 1)),
+    ndraws = 500
+  ) |>
+  mutate(worker = ifelse(worker == 0, "Non-workers", "Workers"))
+
+ggplot(prior_epred, aes(x = .epred)) +
+  stat_halfeye() +
+  facet_wrap(~ worker) +
+  scale_x_continuous(labels = scales::percent_format()) +
+  labs(
+    x = "Prior predictive P(radical right)",
+    y = NULL,
+    title = "Prior predictive distribution"
+  )
+
+
+```
+
+# Sensitivity to weighting
+
+The main estimates use ESS weights because the substantive estimands concern population quantities. Nevertheless, it is useful to fit the simplest model without weights as a **sensitivity analysis**.
+
+The comparison should not be interpreted as choosing whichever model gives the preferred result. Rather, it tells us whether the substantive conclusion depends materially on the survey weighting.
+
+```{r}
+#| label: weighting-sensitivity
+#| message: false
+#| results: hide
+
+m0_unweighted <- brm(
+  radicalright ~ worker,
+  data = voters,
+  family = bernoulli(),
+  prior = pri_m0,
+  backend = "cmdstanr",
+  threads = threading(4),
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  seed = 2026,
+  control = list(adapt_delta = 0.95),
+  file = here("models", "ess11_m0_unweighted")
+)
+
+# Compare the central worker/non-worker probabilities.
+weighted_draws <- as_draws_df(m0) |>
+  as_tibble() |>
+  transmute(
+    model = "Weighted",
+    p_rr_nonworker = plogis(b_Intercept),
+    p_rr_worker = plogis(b_Intercept + b_worker)
+  )
+
+unweighted_draws <- as_draws_df(m0_unweighted) |>
+  as_tibble() |>
+  transmute(
+    model = "Unweighted",
+    p_rr_nonworker = plogis(b_Intercept),
+    p_rr_worker = plogis(b_Intercept + b_worker)
+  )
+
+bind_rows(weighted_draws, unweighted_draws) |>
+  pivot_longer(
+    cols = starts_with("p_rr"),
+    names_to = "quantity",
+    values_to = "value"
+  ) |>
+  group_by(model, quantity) |>
+  median_qi(value, .width = c(.8, .95)) |> 
+  tt()
+
+```
+
+# Optional sensitivity: country-balanced weighting
+
+The default pooled ESS analysis weights countries in proportion to their population size. That is appropriate if the estimand is a population-level quantity for the ten countries taken together.
+
+A different estimand would give each country equal population-level importance. This is not the ESS default pooled estimand. If the substantive question is explicitly about the **average country** rather than the population of all ten countries, country-normalised weights can be used as a sensitivity analysis.
+
+```{r}
+#| label: country-balanced-weights
+
+voters_country_balanced <- voters |>
+  group_by(cntry) |>
+  mutate(
+    w_country_balanced = weight_an / mean(weight_an)
+  ) |>
+  ungroup()
+
+# Check that every country now contributes the same total weight.
+voters_country_balanced |>
+  group_by(cntry) |>
+  summarise(total_weight = sum(w_country_balanced)) |> 
+  tt()
+
+```
+
+# Adding covariates: next stage
+
+Only after the worker association and country heterogeneity have been established should additional individual-level variables be introduced.
+
+The proposed sequence is:
+
+### Model 3: compositional adjustment
+
+```r
+radicalright | weights(w) ~ worker + cohort_fct + gndr_fct + married + immigrant + (1 + worker | cntry)
+```
+
+This asks how the worker association changes after accounting for differences in the composition of workers and non-workers.
+
+The factor reference categories are set explicitly so that the Model 3 coefficients have transparent interpretations. The reference groups are 18–29-year-olds, men, the reference marital-status category “at one point”, non-immigrants, and non-workers. The `get_prior()` call is then used to verify the exact coefficient names before specifying the priors.
+
+```{r}
+#| label: model-3-references-priors
+#| message: false
+#| results: hide
+
+voters_m3 <- voters |>
+  mutate(
+    age_grp_fct = relevel(factor(age_grp_fct), ref = "18-29"),
+    gndr_fct    = relevel(factor(gndr_fct), ref = "men"),
+    married     = relevel(factor(married), ref = "at one point")
+  )
+
+get_prior(
+  radicalright | weights(w) ~
+    worker +
+    age_grp_fct +
+    gndr_fct +
+    married +
+    immigrant +
+    (1 + worker | cntry),
+  data = voters_m3,
+  family = bernoulli()
+)
+
+pri_m3 <- c(
+  # Baseline probability for 18–29-year-old, male, non-immigrant,
+  # non-worker in the reference marital-status category
+  prior(normal(-2.3, 0.7), class = "Intercept"),
+
+  # Worker vs. non-worker
+  prior(normal(0, 0.5), class = "b", coef = "worker"),
+
+  # Age groups
+  prior(normal(0, 0.5), class = "b", coef = "age_grp_fct30M65"),
+  prior(normal(0, 0.5), class = "b", coef = "age_grp_fctabove65"),
+
+  # Gender, immigration, and marital status
+  prior(normal(0, 0.5), class = "b", coef = "gndr_fctwomen"),
+  prior(normal(0, 0.5), class = "b", coef = "immigrant"),
+  prior(normal(0, 0.5), class = "b", coef = "marriednever"),
+
+  # Country-level variation
+  prior(exponential(2), class = "sd"),
+  prior(lkj(2), class = "cor")
+)
+
+# prior predictive check
+pp_check(
+  brm(
+    radicalright ~
+      worker +
+      age_grp_fct +
+      gndr_fct +
+      married +
+      immigrant +
+      (1 + worker | cntry),
+    data = voters_m3,
+    family = bernoulli(),
+    prior = pri_m3,
+    sample_prior = "only",
+  backend = "cmdstanr",
+  threads = threading(4),
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  seed = 2026,
+  file = here("models", "ess11_pp_check")
+  )
+)
+
+```
+
+After the prior predictive check has been inspected and found reasonable, Model 3 is fitted with the same country-varying intercept and worker slope structure as Model 2, while adding age group, gender, marital status, and immigrant status. The primary estimand remains the worker/non-worker difference, so the additional covariates are treated as a compositional adjustment rather than as a causal identification strategy.
+
+```{r}
+#| label: model-3-fit
+#| message: false
+#| results: hide
+
+m3 <- brm(
+  radicalright | weights(w) ~
+    worker +
+    age_grp_fct +
+    gndr_fct +
+    married +
+    immigrant +
+    (1 + worker | cntry),
+  data = voters_m3,
+  family = bernoulli(),
+  prior = pri_m3,
+  backend = "cmdstanr",
+  threads = threading(4),
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  seed = 2026,
+  control = list(adapt_delta = 0.95),
+  file = here("models", "ess11_m3")
+)
+
+summary(m3)
+plot(m3)
+pp_check(m3, type = "bars")
+
+```
+
+## Plot coefficients
+
+The coefficient plot provides a compact view of the adjusted associations on the log-odds scale. It is useful for seeing the direction and uncertainty of the individual covariate coefficients, but it is not the main substantive presentation of Model 3. The latter is given by standardized predicted probabilities and their worker/non-worker difference below.
+
+```{r}
+#| label: model-3-coefficients
+
+draws <- as_draws_df(m3)
+
+draws <- draws |> 
+  rename(
+    Worker = b_worker,
+    "Age 30-65" = b_age_grp_fct30M65,
+    "Age 65+"   = b_age_grp_fctabove65,
+    Woman = b_gndr_fctwomen,
+    Immigrant = "b_immigrant" )
+
+mcmc_areas(
+  draws,
+  pars = c("Worker", "Age 30-65", "Age 65+", "Woman", "Immigrant"),
+  prob = 0.90)+
+  geom_vline(xintercept = 0, 
+             linetype = "dotted")
+
+```
+
+## Average difference in predicted probability
+
+The main substantive quantity is calculated on the probability scale. We duplicate the observed sample, set `worker` successively to 0 and 1, and retain the observed distribution of the adjustment variables. Predictions exclude the country-specific random effects here (`re_formula = NA`) so that this first comparison represents the population-level relationship standardized over the observed covariate distribution.
+
+```{r}
+#| label: model-3-standardized-predictions
+
+newdata_m3 <- bind_rows(
+  voters_m3 |> mutate(worker = 0),
+  voters_m3 |> mutate(worker = 1)
+) |>
+  mutate(.row_weight = w)
+
+posterior_m3 <- m3 |>
+  add_epred_draws(
+    newdata = newdata_m3,
+    re_formula = NA
+  )
+
+# Calculate the weighted standardized probability for each worker status
+# within each posterior draw.
+std_m3 <- posterior_m3 |>
+  group_by(.draw, worker) |>
+  summarise(
+    p = weighted.mean(.epred, w),
+    .groups = "drop"
+  )
+
+# Convert the two standardized probabilities into their posterior difference.
+std_diff_m3 <- std_m3 |>
+  select(.draw, worker, p) |>
+  tidyr::pivot_wider(
+    names_from = worker,
+    values_from = p,
+    names_prefix = "worker_"
+  ) |>
+  mutate(
+    diff = worker_1 - worker_0
+  )
+
+ggplot(std_diff_m3, aes(x = diff)) +
+  stat_halfeye(.width = c(.8, .95),
+   fill  = "grey80",
+   color = "grey40") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(
+    x = "Difference in predicted probability \n Posterior distribution",
+    y = NULL,
+    caption = "Posterior median with 80% and 95% credible intervals")
+
+```
+
+## Country-specific adjusted predictions
+
+The pooled standardized prediction above describes the average worker/non-worker difference. We next retain the country-specific random effects to examine whether the adjusted difference varies across countries. Within each country, workers and non-workers are compared using the same observed distribution of age, gender, marital status, and immigrant status.
+
+```{r}
+#| label: model-3-country-predictions
+
+newdata_m3_country <- bind_rows(
+  voters_m3 |> mutate(worker = 0),
+  voters_m3 |> mutate(worker = 1)
+)
+
+posterior_m3_country <- m3 |>
+  add_epred_draws(
+    newdata = newdata_m3_country,
+    re_formula = NULL
+  )
+
+std_m3_country <- posterior_m3_country |>
+  group_by(.draw, cntry, worker) |>
+  summarise(
+    p = weighted.mean(.epred, w),
+    .groups = "drop"
+  )
+
+diff_m3_country <- std_m3_country |>
+  pivot_wider(
+    names_from = worker,
+    values_from = p,
+    names_prefix = "worker_"
+  ) |>
+  mutate(
+    diff = worker_1 - worker_0
+  )
+
+diff_m3_country <- std_m3_country |>
+  tidyr::pivot_wider(
+    names_from = worker,
+    values_from = p,
+    names_prefix = "worker_"
+  ) |>
+  mutate(
+    diff = worker_1 - worker_0
+  )
+
+country_diff <- diff_m3_country |>
+group_by(cntry) |>
+summarise(diff_med = median(diff))
+
+std_m3_country |>
+left_join(country_diff, by = "cntry") |>
+ggplot(
+  aes(
+    x = p,
+    y = forcats::fct_reorder(cntry, diff_med),
+    colour = factor(worker)
+  )
+) +
+  stat_pointinterval(
+    point_interval = median_qi,
+    .width = c(0.8, 0.95),
+    position = position_dodge(width = 0.5)
+  ) +
+  scale_x_continuous(limits = c(0, 0.4)) +
+  scale_colour_discrete(
+    name = NULL,
+    labels = c("Non-workers", "Workers")
+  ) +
+  labs(
+    x = "Predicted probability of radical-right support",
+    y = NULL
+  )
+
+ggsave(here("figs", "pp_diff_rr_countries.png"),
+      width = 10, height = 7, dpi = 300,
+      bg = "white")
+
+```
+
+
+## Interpreting the Model 3 predictions
+
+The pooled standardized probabilities provide the primary estimate of the worker/non-worker difference after compositional adjustment. The country-specific predictions show whether that adjusted association remains heterogeneous across countries.
+
+The most informative comparison with Model 2 is the posterior distribution of the country-level standard deviation of the worker effect, `sd_cntry__worker`. A reduction relative to Model 2 would indicate that some of the previously estimated cross-national heterogeneity is associated with differences in the observed composition of workers and non-workers. Persistent variation would indicate that country-level heterogeneity remains after this adjustment.
+
+These comparisons are descriptive rather than causal. The Model 3 covariates are not assumed to satisfy the conditions required for causal confounding adjustment.
+
+```{r}
+#| label: modelcomparison
+
+posterior_summary(
+  m3,
+  variable = c(
+    "b_worker",
+    "sd_cntry__worker"
+  )
+)
+
+posterior_summary(
+  m2,
+  variable = c(
+    "b_worker",
+    "sd_cntry__worker"
+  )
+)
+
+```
+
+## Calculate the posterior distribution of the standardized worker–non-worker difference in predicted probability.
+```{r}
+#| label: pp_worker_nonworker
+
+std_diff_m3 <- std_m3 |>
+  tidyr::pivot_wider(
+    names_from = worker,
+    values_from = p,
+    names_prefix = "worker_"
+  ) |>
+  mutate(
+    diff = worker_1 - worker_0
+  )
+
+std_diff_m3 |>
+  summarise(
+    median = median(diff),
+    lower  = quantile(diff, 0.025),
+    upper  = quantile(diff, 0.975)
+  )
+
+# Plot the posterior distribution of the standardized
+# worker–non-worker probability difference.
+
+ggplot(std_diff_m3, aes(x = diff)) +
+  stat_halfeye(
+    .width = c(0.8, 0.95)
+  ) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed"
+  ) +
+  scale_x_continuous(
+    labels = scales::label_percent()
+  ) +
+  labs(
+    x = "Worker − non-worker difference in predicted probability",
+    y = NULL,
+    caption = "Model 3; predictions standardised to the observed covariate distribution"
+  )
+
+```
+
+# Socialist
+
+The section repeats the above analysis for socialist parties, defined as **Social democracy** plus **Communist/Socialist** parties. The outcome is `socialist`, which was already constructed in the data-preparation section.
+
+The main difference from the radical-right analysis is the prior on the intercept. Socialist voting is substantially more common than radical-right voting in these data, so the radical-right intercept prior would be unnecessarily restrictive on the probability scale. The priors below therefore shift the intercept towards a higher baseline probability while retaining the same weakly informative structure for the worker association and the country-level heterogeneity.
+
+## Descriptive benchmark
+
+Before fitting the Bayesian models, calculate the weighted socialist vote among workers and non-workers. These estimates provide a useful empirical benchmark for the prior predictive checks and for the subsequent posterior predictions.
+
+```{r}
+#| label: socialist-descriptive-benchmark
+
+socialist_benchmark <- voters |>
+  summarise(
+    p_soc_worker = weighted.mean(
+      socialist[worker == 1],
+      weight_an[worker == 1],
+      na.rm = TRUE
+    ),
+    p_soc_nonworker = weighted.mean(
+      socialist[worker == 0],
+      weight_an[worker == 0],
+      na.rm = TRUE
+    ),
+    p_worker = weighted.mean(
+      worker,
+      weight_an,
+      na.rm = TRUE
+    ),
+    p_worker_soc = weighted.mean(
+      worker[socialist == 1],
+      weight_an[socialist == 1],
+      na.rm = TRUE
+    )
+  ) |>
+  mutate(
+    class_gap = p_soc_worker - p_soc_nonworker
+  )
+
+socialist_benchmark |> tt()
+```
+
+## Country-specific descriptive estimates
+
+```{r}
+#| label: socialist-country-benchmark
+
+socialist_country_benchmark <- voters |>
+  group_by(cntry) |>
+  summarise(
+    p_soc_worker = weighted.mean(
+      socialist[worker == 1],
+      weight_an[worker == 1],
+      na.rm = TRUE
+    ),
+    p_soc_nonworker = weighted.mean(
+      socialist[worker == 0],
+      weight_an[worker == 0],
+      na.rm = TRUE
+    ),
+    p_worker = weighted.mean(
+      worker,
+      weight_an,
+      na.rm = TRUE
+    ),
+    p_worker_soc = weighted.mean(
+      worker[socialist == 1],
+      weight_an[socialist == 1],
+      na.rm = TRUE
+    ),
+    n = n(),
+    .groups = "drop"
+  ) |>
+  mutate(
+    class_gap = p_soc_worker - p_soc_nonworker
+  )
+
+socialist_country_benchmark |> tt()
+```
+
+# Model 0: pooled Bayesian model for socialist voting
+
+The pooled model is:
+
+$$
+S_i \sim \operatorname{Bernoulli}(p_i)
+$$
+
+$$
+\operatorname{logit}(p_i)=\alpha+\beta W_i.
+$$
+
+This gives:
+
+$$
+P(S\mid W=0)=\operatorname{logit}^{-1}(\alpha)
+$$
+
+and
+
+$$
+P(S\mid W=1)=\operatorname{logit}^{-1}(\alpha+\beta).
+$$
+
+The contribution quantity is derived from these probabilities and the posterior distribution of the worker prevalence.
+
+## Priors
+
+The socialist intercept prior is shifted upwards relative to the radical-right prior. `normal(-1.1, 0.6)` has a median probability of about 25% on the probability scale and still allows substantial uncertainty around that value. This is intended to reflect the much higher prevalence of socialist voting without making the prior depend tightly on the observed outcome.
+
+The worker coefficient remains centred at zero because the prior should not determine the direction of the worker association.
+
+```{r}
+#| label: socialist-pooled-priors
+
+pri_soc_m0 <- c(
+  prior(normal(-1.1, 0.6), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "worker")
+)
+```
+
+## Fit the pooled weighted model
+
+```{r}
+#| label: socialist-pooled-model
+
+m0_soc <- brm(
+  socialist | weights(w) ~ worker,
+  data = voters,
+  family = bernoulli(),
+  prior = pri_soc_m0,
+  backend = "cmdstanr",
+  threads = threading(4),
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  seed = 2026,
+  control = list(adapt_delta = 0.95),
+  file = here("models", "ess11_m0_soc")
+)
+
+summary(m0_soc)
+```
+
+## Derive socialist loyalty and contribution
+
+The worker-prevalence model from the radical-right analysis can be reused because `P(worker)` is a property of the sample, not of the party outcome. The socialist posterior predictions are then combined with the same posterior draws of worker prevalence.
+
+```{r}
+#| label: socialist-pooled-predictions
+
+post_soc_m0 <- as_draws_df(m0_soc) |>
+  as_tibble() |>
+  select(.draw, alpha = b_Intercept, beta = b_worker) |>
+  inner_join(
+    as_draws_df(m_worker) |>
+      as_tibble() |>
+      select(.draw, gamma = b_Intercept),
+    by = ".draw"
+  ) |>
+  mutate(
+    p_soc_worker = plogis(alpha + beta),
+    p_soc_nonworker = plogis(alpha),
+    p_worker = plogis(gamma),
+    p_soc = p_soc_worker * p_worker +
+      p_soc_nonworker * (1 - p_worker),
+    p_worker_soc = p_soc_worker * p_worker / p_soc,
+    class_gap = p_soc_worker - p_soc_nonworker
+  )
+
+post_soc_m0 |>
+  select(
+    .draw,
+    p_soc_worker,
+    p_soc_nonworker,
+    p_worker,
+    p_soc,
+    p_worker_soc,
+    class_gap
+  ) |>
+  pivot_longer(
+    - .draw,
+    names_to = "quantity",
+    values_to = "value"
+  ) |>
+  group_by(quantity) |>
+  median_qi(value, .width = c(.80, .95))
+
+```
+
+## Posterior versus descriptive benchmark
+
+```{r}
+#| label: socialist-benchmark-comparison
+
+socialist_posterior_summary <- post_soc_m0 |>
+  summarise(
+    p_soc_worker = median(p_soc_worker),
+    p_soc_nonworker = median(p_soc_nonworker),
+    p_worker = median(p_worker),
+    p_worker_soc = median(p_worker_soc),
+    class_gap = median(class_gap)
+  )
+
+bind_rows(
+  socialist_benchmark |>
+    mutate(source = "Weighted descriptive estimate"),
+  socialist_posterior_summary |>
+    mutate(source = "Posterior median")
+) |>
+  relocate(source) |> 
+  tt()
+```
+
+# Prior predictive check for socialist voting
+
+The prior predictive check is especially important here because the intercept prior has been shifted to reflect the substantially higher prevalence of socialist voting.
+
+```{r}
+#| label: socialist-prior-predictive
+
+m0_soc_prior <- brm(
+  socialist ~ worker,
+  data = voters,
+  family = bernoulli(),
+  prior = pri_soc_m0,
+  sample_prior = "only",
+  backend = "cmdstanr",
+  threads = threading(4),
+  chains = 4,
+  cores = 4,
+  iter = 1000,
+  warmup = 500,
+  seed = 2026,
+  file = here("models", "ess11_m0_soc_prior")
+)
+
+prior_soc_epred <- m0_soc_prior |>
+  epred_draws(
+    newdata = tibble(worker = c(0, 1)),
+    ndraws = 500
+  ) |>
+  mutate(
+    worker = ifelse(worker == 0, "Non-workers", "Workers")
+  )
+
+ggplot(prior_soc_epred, aes(x = .epred)) +
+  stat_halfeye() +
+  facet_wrap(~ worker) +
+  scale_x_continuous(labels = scales::percent_format()) +
+  labs(
+    x = "Prior predictive P(socialist vote)",
+    y = NULL,
+    title = "Prior predictive distribution for socialist voting"
+  )
+
+```
+
+# Model 1: country-varying intercepts
+
+The first extension allows countries to differ in their baseline level of socialist voting:
+
+$$
+\operatorname{logit}(p_{ic})=\alpha_c+\beta W_{ic}.
+$$
+
+The intercept prior is again shifted relative to the radical-right model.
+
+```{r}
+#| label: socialist-model-1
+
+pri_soc_m1 <- c(
+  prior(normal(-1.1, 0.6), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "worker"),
+  prior(exponential(1), class = "sd")
+)
+
+m1_soc <- brm(
+  socialist | weights(w) ~ worker + (1 | cntry),
+  data = voters,
+  family = bernoulli(),
+  prior = pri_soc_m1,
+  backend = "cmdstanr",
+  threads = threading(4),
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  seed = 2026,
+  control = list(adapt_delta = 0.95),
+  file = here("models", "ess11_m1_soc")
+)
+
+summary(m1_soc)
+
+```
+
+## Posterior predictive check
+
+```{r}
+
+pp_check(m1_soc, type = "bars")
+
+```
+
+# Model 2: country-varying worker effects
+
+The main hierarchical model allows both the baseline level of socialist voting and the worker association to vary across countries:
+
+$$
+\operatorname{logit}(p_{ic})=\alpha_c+\beta_c W_{ic}.
+$$
+
+```{r}
+#| label: socialist-model-2
+
+pri_soc_m2 <- c(
+  prior(normal(-1.1, 0.6), class = "Intercept"),
+  prior(normal(0, 1), class = "b", coef = "worker"),
+  prior(exponential(1), class = "sd"),
+  prior(lkj(2), class = "cor")
+)
+
+m2_soc <- brm(
+  socialist | weights(w) ~ worker + (1 + worker | cntry),
+  data = voters,
+  family = bernoulli(),
+  prior = pri_soc_m2,
+  backend = "cmdstanr",
+  threads = threading(4),
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  seed = 2026,
+  control = list(adapt_delta = 0.95),
+  file = here("models", "ess11_m2_soc")
+)
+
+summary(m2_soc)
+```
+
+## Posterior predictive check -- model 2
+
+```{r}
+
+pp_check(m2_soc, type = "bars")
+
+```
+# Posterior predictions from Model 2
+
+```{r}
+#| label: socialist-model-2-predictions
+
+nd_soc <- expand_grid(
+  cntry = levels(voters$cntry),
+  worker = c(0, 1)
+)
+
+epred_soc_m2 <- m2_soc |>
+  epred_draws(
+    newdata = nd_soc,
+    re_formula = NULL
+  ) |>
+  ungroup() |>
+  select(cntry, worker, .draw, .epred)
+
+gap_soc_m2 <- epred_soc_m2 |>
+  pivot_wider(
+    names_from = worker,
+    values_from = .epred,
+    names_prefix = "worker_"
+  ) |>
+  mutate(
+    class_gap = worker_1 - worker_0
+  )
+
+gap_soc_m2 |>
+  pivot_longer(
+    cols = c(worker_1, worker_0, class_gap),
+    names_to = "quantity",
+    values_to = "value"
+  ) |>
+  group_by(cntry, quantity) |>
+  median_qi(value, .width = c(.8, .95)) |> 
+  tt()
+
+```
+
+## Plot: socialist loyalty by country
+
+```{r}
+#| label: socialist-plot-loyalty
+
+ord_soc <- epred_soc_m2 |>
+  filter(worker == 1) |>
+  group_by(cntry) |>
+  summarise(m = median(.epred)) |>
+  arrange(m) |>
+  pull(cntry)
+
+epred_soc_m2 |>
+  filter(worker == 1) |>
+  mutate(cntry = factor(cntry, levels = ord_soc)) |>
+  ggplot(aes(x = .epred, y = cntry)) +
+  stat_halfeye(.width = c(.8, .95),
+    color = "grey40",
+    fill  = "grey80") +
+  scale_x_continuous(limits = c(0, 1)) +
+  labs(
+    x = "P(socialist vote | worker)",
+    y = NULL,
+    caption = "Posterior median with 80% and 95% credible intervals"
+  )
+
+ggsave(here("figs", "loyalty_worker_soc_countries.png"),
+      width = 10, height = 7, dpi = 300,
+      bg = "white")
+```
+
+## Plot: worker/non-worker gap
+
+```{r}
+#| label: socialist-plot-gap
+
+gap_soc_order <- gap_soc_m2 |>
+  group_by(cntry) |>
+  summarise(m = median(class_gap)) |>
+  arrange(m) |>
+  pull(cntry)
+
+gap_soc_m2 |>
+  mutate(cntry = factor(cntry, levels = gap_soc_order)) |>
+  ggplot(aes(x = class_gap, y = cntry)) +
+  stat_halfeye(.width = c(.8, .95), point_interval = median_qi,
+    color = "grey40",
+    fill  = "grey80"
+  ) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  labs(
+    x = "P(socialist | worker) − P(socialist | non-worker)",
+    y = NULL ) 
+
+ggsave(here("figs", "loyalty_classgap_soc_countries.png"),
+      width = 10, height = 7, dpi = 300,
+      bg = "white")
+```
+
+# Deriving socialist contribution by country
+
+The contribution quantity is:
+
+$$
+P(W\mid S,c)=
+\frac{P(S\mid W,c)P(W\mid c)}
+{P(S\mid W,c)P(W\mid c)+P(S\mid \neg W,c)[1-P(W\mid c)]}.
+$$
+
+The country-specific worker prevalence model from the radical-right analysis can be reused because it does not depend on the party outcome.
+
+```{r}
+#| label: socialist-contribution-country
+
+worker_country_soc <- worker_country
+
+contribution_soc_country <- gap_soc_m2 |>
+  rename(
+    p_soc_nonworker = worker_0,
+    p_soc_worker = worker_1
+  ) |>
+  inner_join(
+    worker_country_soc,
+    by = c("cntry", ".draw")
+  ) |>
+  mutate(
+    p_soc = p_soc_worker * p_worker +
+      p_soc_nonworker * (1 - p_worker),
+    p_worker_soc = p_soc_worker * p_worker / p_soc
+  )
+
+contribution_soc_country |>
+  group_by(cntry) |>
+  summarise(
+    across(
+      c(
+        p_soc_worker,
+        p_soc_nonworker,
+        p_worker,
+        p_worker_soc
+      ),
+      list(
+        median = median,
+        lower = ~ quantile(.x, 0.025),
+        upper = ~ quantile(.x, 0.975)
+      ),
+      .names = "{.col}_{.fn}"
+    )
+  ) |>
+  tt()
+```
+
+## Plot of estimated contribution per country
+
+The contribution estimate is the posterior probability that a voter is a worker, conditional on voting for a socialist party. Countries are ordered by their posterior median.
+
+```{r}
+#| label: socialist-plot-contribution-country
+
+contribution_soc_order <- contribution_soc_country |>
+  group_by(cntry) |>
+  summarise(m = median(p_worker_soc)) |>
+  arrange(m) |>
+  pull(cntry)
+
+contribution_soc_country |>
+  mutate(cntry = factor(cntry, levels = contribution_soc_order)) |>
+  ggplot(aes(x = p_worker_soc, y = cntry)) +
+  stat_halfeye(
+    point_interval = median_qi,
+    .width = c(.80, .95),
+    fill  = "grey80",
+    color = "grey40"
+  ) +
+  scale_x_continuous(
+    labels = scales::label_percent(accuracy = 1)
+  ) +
+  labs(
+    x = "P(worker | socialist)",
+    y = NULL,
+    caption = "Posterior median with 80% and 95% credible intervals"
+  )
+
+ggsave(
+  here("figs", "contribution_worker_soc_countries.png"),
+  width = 10,
+  height = 7,
+  dpi = 300,
+  bg = "white"
+)
+```
+
+# Model 3: compositional adjustment
+
+Model 3 repeats the covariate adjustment used for radical-right voting. The only substantive change is the outcome and the intercept prior.
+
+The intercept prior is shifted from `normal(-2.3, 0.7)` to `normal(-1.4, 0.6)`. The tighter scale reflects the fact that the baseline probability for the reference group should still be plausible on the higher socialist-vote scale, while allowing substantial uncertainty.
+
+```{r}
+#| label: socialist-model-3-references-priors
+
+voters_soc_m3 <- voters |>
+  mutate(
+    age_grp_fct = relevel(factor(age_grp_fct), ref = "18-29"),
+    gndr_fct    = relevel(factor(gndr_fct), ref = "men"),
+    married     = relevel(factor(married), ref = "at one point")
+  )
+
+get_prior(
+  socialist | weights(w) ~
+    worker +
+    age_grp_fct +
+    gndr_fct +
+    married +
+    immigrant +
+    (1 + worker | cntry),
+  data = voters_soc_m3,
+  family = bernoulli()
+)
+
+pri_soc_m3 <- c(
+  # Higher baseline socialist-vote probability than in the radical-right model
+  prior(normal(-.4, .4), class = "Intercept"),
+
+  # Worker vs. non-worker
+  prior(normal(0, 0.5), class = "b", coef = "worker"),
+
+  # Age groups
+  prior(normal(0, 0.5), class = "b", coef = "age_grp_fct30M65"),
+  prior(normal(0, 0.5), class = "b", coef = "age_grp_fctabove65"),
+
+  # Gender, immigration, and marital status
+  prior(normal(0, 0.5), class = "b", coef = "gndr_fctwomen"),
+  prior(normal(0, 0.5), class = "b", coef = "immigrant"),
+  prior(normal(0, 0.5), class = "b", coef = "marriednever"),
+
+  # Country-level variation
+  prior(exponential(2), class = "sd"),
+  prior(lkj(2), class = "cor")
+)
+
+```
+
+## Prior predictive check for Model 3
+
+```{r}
+#| label: socialist-model-3-prior-predictive
+
+m3_soc_prior <- brm(
+  socialist ~
+    worker +
+    age_grp_fct +
+    gndr_fct +
+    married +
+    immigrant +
+    (1 + worker | cntry),
+  data = voters_soc_m3,
+  family = bernoulli(),
+  prior = pri_soc_m3,
+  sample_prior = "only",
+  backend = "cmdstanr",
+  threads = threading(4),
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  seed = 2026,
+  file = here("models", "ess11_m3_soc_prior")
+)
+pp_check(m3_soc_prior, type = "bars")
+
+pp_check(m3_soc_prior, type = "stat_grouped", stat = "mean", group = "cntry")
+
+prior_epred_soc <- m3_soc_prior |>
+  epred_draws(
+    newdata = voters,
+    re_formula = NULL,
+    ndraws = 500
+  )
+
+ggplot(prior_epred_soc, aes(x = .epred)) +
+  geom_histogram(bins = 50) +
+  scale_x_continuous(
+    labels = scales::label_percent(accuracy = 1)
+  ) +
+  labs(
+    x = "Prior predicted probability of voting socialist",
+    y = "Count"
+  )
+
+prior_epred_soc |>
+  group_by(.draw) |>
+  summarise(
+    mean_p = mean(.epred),
+    .groups = "drop"
+  ) |>
+  ggplot(aes(x = mean_p)) +
+  geom_histogram(bins = 40) +
+  scale_x_continuous(
+    labels = scales::label_percent(accuracy = 1)
+  ) +
+  labs(
+    x = "Mean prior predicted probability of voting socialist",
+    y = "Number of prior draws"
+  )
+
+
+
+```
+
+## Fit Model 3
+
+```{r}
+#| label: socialist-model-3-fit
+
+m3_soc <- brm(
+  socialist | weights(w) ~
+    worker +
+    age_grp_fct +
+    gndr_fct +
+    married +
+    immigrant +
+    (1 + worker | cntry),
+  data = voters_soc_m3,
+  family = bernoulli(),
+  prior = pri_soc_m3,
+  backend = "cmdstanr",
+  threads = threading(4),
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  seed = 2026,
+  control = list(adapt_delta = 0.95),
+  file = here("models", "ess11_m3_soc")
+)
+
+summary(m3_soc)
+#plot(m3_soc)
+pp_check(m3_soc, type = "bars")
+
+```
+
+## Standardized worker/non-worker predictions
+
+```{r}
+#| label: socialist-model-3-standardized-predictions
+
+newdata_soc_m3 <- bind_rows(
+  voters_soc_m3 |> mutate(worker = 0),
+  voters_soc_m3 |> mutate(worker = 1)
+) |>
+  mutate(.row_weight = w)
+
+posterior_soc_m3 <- m3_soc |>
+  add_epred_draws(
+    newdata = newdata_soc_m3,
+    re_formula = NA
+  )
+
+std_soc_m3 <- posterior_soc_m3 |>
+  group_by(.draw, worker) |>
+  summarise(
+    p = weighted.mean(.epred, w),
+    .groups = "drop"
+  )
+
+std_diff_soc_m3 <- std_soc_m3 |>
+  pivot_wider(
+    names_from = worker,
+    values_from = p,
+    names_prefix = "worker_"
+  ) |>
+  mutate(
+    diff = worker_1 - worker_0
+  )
+
+std_diff_soc_m3 |>
+  summarise(
+    median = median(diff),
+    lower = quantile(diff, 0.025),
+    upper = quantile(diff, 0.975)
+  )
+
+ggplot(std_diff_soc_m3, aes(x = diff)) +
+  stat_halfeye(.width = c(.80, .95),
+    color = "grey40",
+    fill  = "grey80") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  scale_x_continuous() +
+  labs(
+    x = "Worker − non-worker difference in predicted probability",
+    y = NULL  )
+
+ggsave(
+  here("figs", "dif_worker_nonworker_soc.png"),
+  width = 10,
+  height = 7,
+  dpi = 300,
+  bg = "white"
+)
+
+```
+
+## Country-specific adjusted predictions
+
+```{r}
+#| label: socialist-model-3-country-predictions
+
+newdata_m3_country <- bind_rows(
+  voters_soc_m3 |> mutate(worker = 0),
+  voters_soc_m3 |> mutate(worker = 1)
+)
+
+posterior_m3_country <- m3_soc |>
+  add_epred_draws(
+    newdata = newdata_m3_country,
+    re_formula = NULL
+  )
+
+std_m3_country <- posterior_m3_country |>
+  group_by(.draw, cntry, worker) |>
+  summarise(
+    p = weighted.mean(.epred, w),
+    .groups = "drop"
+  )
+
+diff_m3_country <- std_m3_country |>
+  tidyr::pivot_wider(
+    names_from = worker,
+    values_from = p,
+    names_prefix = "worker_"
+  ) |>
+  mutate(
+    diff = worker_1 - worker_0
+  )
+
+country_diff <- diff_m3_country |>
+group_by(cntry) |>
+summarise(diff_med = median(diff))
+
+std_m3_country |>
+left_join(country_diff, by = "cntry") |>
+ggplot(
+  aes(
+    x = p,
+    y = forcats::fct_reorder(cntry, diff_med),
+    colour = factor(worker)
+  )
+) +
+  stat_pointinterval(
+    point_interval = median_qi,
+    .width = c(0.8, 0.95),
+    position = position_dodge(width = 0.5)
+  ) +
+  scale_x_continuous(limits = c(0, 0.8)) +
+  scale_colour_discrete(
+    name = NULL,
+    labels = c("Non-workers", "Workers")
+  ) +
+  labs(
+    x = "Predicted probability of radical-right support",
+    y = NULL
+  )
+
+ggsave(here("figs", "pp_diff_soc_countries.png"),
+      width = 10, height = 7, dpi = 300,
+      bg = "white")
+
+```
+
+## Model comparison
+
+As in the radical-right analysis, compare the worker coefficient and the cross-country standard deviation of the worker effect across Models 2 and 3.
+
+```{r}
+#| label: socialist-model-comparison
+
+posterior_summary(
+  m3_soc,
+  variable = c(
+    "b_worker",
+    "sd_cntry__worker"
+  )
+)
+
+posterior_summary(
+  m2_soc,
+  variable = c(
+    "b_worker",
+    "sd_cntry__worker"
+  )
+)
+```
+
+## Standardized worker–non-worker difference
+
+```{r}
+#| label: socialist-pp-worker-nonworker
+
+std_diff_soc_m3 |>
+  summarise(
+    median = median(diff),
+    lower  = quantile(diff, 0.025),
+    upper  = quantile(diff, 0.975)
+  )
+
+ggplot(std_diff_soc_m3, aes(x = diff)) +
+  stat_halfeye(.width = c(0.80, 0.95),
+    color = "grey40",
+    fill  = "grey80") +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed"
+  ) +
+  scale_x_continuous(labels = scales::label_percent()) +
+  labs(
+    x = "Worker − non-worker difference in predicted probability",
+    y = NULL,
+    caption = "Model 3; predictions standardised to the observed covariate distribution"
+  )
+  
+```
+
+# Weighting sensitivity for socialist voting
+
+The same weighting sensitivity analysis can be repeated for socialist voting.
+
+```{r}
+#| label: socialist-weighting-sensitivity
+
+m0_soc_unweighted <- brm(
+  socialist ~ worker,
+  data = voters,
+  family = bernoulli(),
+  prior = pri_soc_m0,
+  backend = "cmdstanr",
+  threads = threading(4),
+  chains = 4,
+  cores = 4,
+  iter = 2000,
+  warmup = 1000,
+  seed = 2026,
+  control = list(adapt_delta = 0.95)
+)
+
+weighted_soc_draws <- as_draws_df(m0_soc) |>
+  as_tibble() |>
+  transmute(
+    model = "Weighted",
+    p_soc_nonworker = plogis(b_Intercept),
+    p_soc_worker = plogis(b_Intercept + b_worker)
+  )
+
+unweighted_soc_draws <- as_draws_df(m0_soc_unweighted) |>
+  as_tibble() |>
+  transmute(
+    model = "Unweighted",
+    p_soc_nonworker = plogis(b_Intercept),
+    p_soc_worker = plogis(b_Intercept + b_worker)
+  )
+
+bind_rows(weighted_soc_draws, unweighted_soc_draws) |>
+  pivot_longer(
+    cols = starts_with("p_soc"),
+    names_to = "quantity",
+    values_to = "value"
+  ) |>
+  group_by(model, quantity) |>
+  median_qi(value, .width = c(.8, .95)) |>
+  tt()
+```
+
+# Summary of the socialist analysis
+
+The socialist analysis uses the same estimands and modelling sequence as the radical-right analysis:
+
+1. **Loyalty:** \(P(\text{socialist}\mid\text{worker})\)
+2. **Non-worker socialist support:** \(P(\text{socialist}\mid\text{non-worker})\)
+3. **Class gap:** \(P(\text{socialist}\mid\text{worker})-P(\text{socialist}\mid\text{non-worker})\)
+4. **Contribution:** \(P(\text{worker}\mid\text{socialist})\)
+
+The main prior adjustment is to the intercept. The socialist-vote intercept is centred substantially higher than the radical-right intercept because the socialist outcome is more prevalent. The priors on the worker coefficient, country-level standard deviations, correlations, and compositional covariates retain the same basic structure unless the prior predictive checks indicate that further adjustment is warranted.
+
+# Country-level scatter plots: loyalty and contribution
+
+The following plots bring the country-specific posterior quantities from Model 2 together. Each point is a country's posterior median. The horizontal and vertical bars show 80% credible intervals. All quantities come from the draw-level objects `contribution_country` (radical right) and `contribution_soc_country` (socialist), which were built above, so no additional models are fitted.
+
+```{r}
+#| label: scatter-country-summaries
+
+# Summarise one posterior quantity by country: median and 80% interval.
+summarise_country <- function(data, var, prefix) {
+  data |>
+    group_by(cntry) |>
+    summarise(
+      "{prefix}_med" := median({{ var }}),
+      "{prefix}_lo"  := quantile({{ var }}, 0.10),
+      "{prefix}_hi"  := quantile({{ var }}, 0.90),
+      .groups = "drop"
+    )
+}
+
+scatter_country <- list(
+  summarise_country(contribution_country, p_rr_worker, "rr_loyalty"),
+  summarise_country(contribution_country, p_worker_rr, "rr_contrib"),
+  summarise_country(contribution_soc_country, p_soc_worker, "soc_loyalty"),
+  summarise_country(contribution_soc_country, p_worker_soc, "soc_contrib")
+) |>
+  reduce(inner_join, by = "cntry")
+
+scatter_country |>
+  select(cntry, ends_with("_med")) |>
+  tt(digits = 3)
+
+# Common scatter-plot template
+country_scatter <- function(data, x, y, x_lo, x_hi, y_lo, y_hi,
+                            xlab, ylab, diagonal = FALSE) {
+  p <- ggplot(data, aes(x = {{ x }}, y = {{ y }}))
+
+  if (diagonal) {
+    p <- p + geom_abline(intercept = 0, slope = 1,
+                         linetype = "dashed", colour = "grey60")
+  }
+
+  p +
+    geom_errorbar(aes(xmin = {{ x_lo }}, xmax = {{ x_hi }}),
+                  width = 0, orientation = "y", colour = "grey60") +
+    geom_errorbar(aes(ymin = {{ y_lo }}, ymax = {{ y_hi }}),
+                  width = 0, colour = "grey60") +
+    geom_point(size = 2.5) +
+    # Use ggrepel for non-overlapping labels if it is installed
+    {
+      if (requireNamespace("ggrepel", quietly = TRUE)) {
+        ggrepel::geom_text_repel(aes(label = cntry), size = 3.5, seed = 2026,
+                                 max.overlaps = Inf)
+      } else {
+        geom_text(aes(label = cntry), vjust = -0.9, size = 3.5)
+      }
+    } +
+    scale_x_continuous(labels = scales::label_percent(accuracy = 1)) +
+    scale_y_continuous(labels = scales::label_percent(accuracy = 1)) +
+    labs(
+      x = xlab,
+      y = ylab,
+      caption = "Posterior medians with 80% credible intervals (Model 2)"
+    )
+}
+
+```
+
+## Radical right: loyalty vs. contribution
+
+```{r}
+#| label: scatter-rr-loyalty-contribution
+
+country_scatter(
+  scatter_country,
+  x = rr_loyalty_med, y = rr_contrib_med,
+  x_lo = rr_loyalty_lo, x_hi = rr_loyalty_hi,
+  y_lo = rr_contrib_lo, y_hi = rr_contrib_hi,
+  xlab = "Loyalty: P(radical right | worker)",
+  ylab = "Contribution: P(worker | radical right)"
+)
+
+ggsave(here("figs", "scatter_loyalty_contribution_rr.png"),
+       width = 8, height = 7, dpi = 300,
+       bg = "white")
+
+```
+
+## Socialists: loyalty vs. contribution
+
+```{r}
+#| label: scatter-soc-loyalty-contribution
+
+country_scatter(
+  scatter_country,
+  x = soc_loyalty_med, y = soc_contrib_med,
+  x_lo = soc_loyalty_lo, x_hi = soc_loyalty_hi,
+  y_lo = soc_contrib_lo, y_hi = soc_contrib_hi,
+  xlab = "Loyalty: P(socialist | worker)",
+  ylab = "Contribution: P(worker | socialist)"
+)
+
+ggsave(here("figs", "scatter_loyalty_contribution_soc.png"),
+       width = 8, height = 7, dpi = 300,
+       bg = "white")
+
+```
+
+## Loyalty: radical right vs. socialists
+
+The dashed line marks equal loyalty. Countries above the line have a larger share of workers voting socialist than voting for the radical right.
+
+```{r}
+#| label: scatter-loyalty-rr-soc
+
+country_scatter(
+  scatter_country,
+  x = rr_loyalty_med, y = soc_loyalty_med,
+  x_lo = rr_loyalty_lo, x_hi = rr_loyalty_hi,
+  y_lo = soc_loyalty_lo, y_hi = soc_loyalty_hi,
+  xlab = "P(radical right | worker)",
+  ylab = "P(socialist | worker)",
+  diagonal = TRUE
+)
+
+ggsave(here("figs", "scatter_loyalty_rr_soc.png"),
+       width = 8, height = 7, dpi = 300,
+       bg = "white")
+
+```
+
+## Contribution: radical right vs. socialists
+
+The dashed line marks equal contribution. Countries below the line have a larger share of workers in the radical-right electorate than in the socialist electorate.
+
+```{r}
+#| label: scatter-contribution-rr-soc
+
+country_scatter(
+  scatter_country,
+  x = rr_contrib_med, y = soc_contrib_med,
+  x_lo = rr_contrib_lo, x_hi = rr_contrib_hi,
+  y_lo = soc_contrib_lo, y_hi = soc_contrib_hi,
+  xlab = "P(worker | radical right)",
+  ylab = "P(worker | socialist)",
+  diagonal = TRUE
+)
+
+ggsave(here("figs", "scatter_contribution_rr_soc.png"),
+       width = 8, height = 7, dpi = 300,
+       bg = "white")
+
+```

@@ -1,0 +1,970 @@
+---
+title: "Loyalty and Contribution across Oesch's Five Classes"
+subtitle: "ESS Round 11 — pooled Bayesian analysis with survey weights"
+author:
+  - name: Armin Schäfer
+    affiliation:
+      - id: jgu
+        name: Johannes Gutenberg University Mainz
+format:
+  html:
+    number-sections: true
+    code-fold: true
+    code-summary: "Show the code"
+    self-contained: true
+    toc: true
+execute:
+  warning: false
+  message: false
+---
+
+# Purpose
+
+The main analysis (`analyze_ess_11.qmd`) uses a dichotomous class measure: workers (skilled and low-skilled workers) versus everybody else. This document repeats the **pooled** analyses with Oesch's five-class scheme:
+
+1. Higher-grade service class
+2. Lower-grade service class
+3. Small business owners
+4. Skilled workers
+5. Low-skilled workers
+
+The estimands remain the same two conditional probabilities, now defined for every class $k$ and party family $P$ (radical right or socialist):
+
+- **Loyalty:** $P(P \mid k)$ — the share of class $k$ that votes for party family $P$.
+- **Contribution:** $P(k \mid P)$ — the share of party family $P$'s electorate that belongs to class $k$.
+
+With two classes these quantities come from a $2\times2$ table; with five classes they come from a $5\times2$ table. The strategy is unchanged: estimate the table-generating probabilities — $P(P\mid k)$ and the class distribution $P(k)$ — and derive both loyalty and contribution from the *same* posterior draws via Bayes' rule:
+
+$$
+P(k\mid P)=\frac{P(P\mid k)\,P(k)}{\sum_{j=1}^{5}P(P\mid j)\,P(j)}.
+$$
+
+Two further quantities help to connect loyalty and contribution:
+
+- **Loyalty gap:** $P(P\mid k)-P(P\mid \neg k)$, the five-class analogue of the worker/non-worker gap. We also report the gap relative to the higher-grade service class.
+- **Representation ratio:** $P(k\mid P)/P(k)$. A value above one means class $k$ is over-represented in the party's electorate relative to its share among all voters. Because
+$$
+\frac{P(k\mid P)}{P(k)}=\frac{P(P\mid k)}{P(P)},
+$$
+the representation ratio is simultaneously *relative loyalty* (class $k$'s loyalty relative to the party's overall vote share). It is therefore the link between the two perspectives: contribution depends on relative loyalty *and* on class size.
+
+The analysis stays pooled across the ten countries and uses `anweight` (constructed as `pspwght * pweight`, as in the main analysis). Country-specific models with five classes would require $5\times10$ cells per party, several of which are thin (especially small business owners among radical-right voters). The pooled analysis is where the finer class scheme adds most information at acceptable cost.
+
+# Setup
+
+```{r}
+#| label: setup
+#| echo: false
+
+if (!require("pacman")) {
+  install.packages("pacman")
+  library(pacman)
+}
+
+p_load(
+  here, rio, tidyverse, brms, tidybayes, ggdist, posterior,
+  bayesplot, tinytable
+)
+
+options(
+  dplyr.summarise.inform = FALSE,
+  mc.cores = parallel::detectCores()
+)
+
+set.seed(2026)
+
+source(here("scripts", "_common.R"))
+
+```
+
+# Data
+
+The data preparation is identical to the main analysis, so the analysis sample is the same. The only addition is an explicitly ordered five-class factor.
+
+```{r}
+#| label: load-data
+
+ess <- import(here("data", "processed", "ess_short_1_11.rds"), trust = TRUE)
+
+countries <- c("BE", "CH", "DE", "ES", "FI", "FR", "NL", "NO", "PT", "SE")
+
+class_levels <- c(
+  "Higher-grade service class",
+  "Lower-grade service class",
+  "Small business",
+  "Skilled workers",
+  "Low-skilled workers"
+)
+
+# Short labels for plots
+class_labels <- c(
+  "Higher-grade service class" = "Higher service",
+  "Lower-grade service class"  = "Lower service",
+  "Small business"             = "Small business",
+  "Skilled workers"            = "Skilled workers",
+  "Low-skilled workers"        = "Low-skilled workers"
+)
+
+worker_classes <- c("Skilled workers", "Low-skilled workers")
+
+ess11 <- ess |>
+  filter(
+    essround == 11,
+    cntry %in% countries
+  ) |>
+  mutate(
+    cntry = droplevels(factor(cntry)),
+
+    socialist = case_when(
+      vote_fct %in% c("Communist/Socialist", "Social democracy") ~ 1,
+      vote_fct %in% c(
+        "Agrarian", "Conservative/Christian democracy", "Green",
+        "Liberal", "Radical right"
+      ) ~ 0
+    ),
+
+    radicalright = case_when(
+      vote_fct == "Radical right" ~ 1,
+      vote_fct %in% c(
+        "Agrarian", "Communist/Socialist",
+        "Conservative/Christian democracy", "Green", "Liberal",
+        "Social democracy"
+      ) ~ 0
+    ),
+
+    worker = case_when(
+      class5fac %in% worker_classes ~ 1,
+      class5fac %in% setdiff(class_levels, worker_classes) ~ 0
+    )
+  ) |>
+  select(essround, cntry, age_grp_fct, class5fac, worker,
+         socialist, radicalright, married, gndr_fct, immigrant,
+         pspwght, pweight) |>
+  drop_na() |>
+  mutate(weight_an = pspwght * pweight)
+
+voters <- ess11 |>
+  filter(
+    !is.na(radicalright),
+    !is.na(worker),
+    !is.na(weight_an),
+    weight_an > 0
+  ) |>
+  mutate(
+    class5 = factor(as.character(class5fac), levels = class_levels),
+    w = weight_an / mean(weight_an)
+  )
+
+# Every respondent must map onto one of the five classes.
+stopifnot(!anyNA(voters$class5))
+
+```
+
+## Cell sizes
+
+The unweighted cell counts matter for how much information each class-by-party cell contributes. Small business owners are the smallest class and deserve particular attention.
+
+```{r}
+#| label: cell-sizes
+
+voters |>
+  group_by(class5) |>
+  summarise(
+    n = n(),
+    n_rr = sum(radicalright),
+    n_soc = sum(socialist),
+    .groups = "drop"
+  ) |>
+  tt()
+
+```
+
+# Descriptive benchmark
+
+Weighted shares computed directly from the data. The Bayesian estimates below should reproduce these closely; they add a coherent uncertainty statement and derived quantities that respect the constraints of the table.
+
+```{r}
+#| label: descriptive-benchmark
+
+# Loyalty and class distribution
+bench_loyalty <- voters |>
+  group_by(class5) |>
+  summarise(
+    p_rr_class  = weighted.mean(radicalright, weight_an),
+    p_soc_class = weighted.mean(socialist, weight_an),
+    wsum = sum(weight_an),
+    .groups = "drop"
+  ) |>
+  mutate(p_class = wsum / sum(wsum)) |>
+  select(-wsum)
+
+# Contribution: class composition of each electorate
+bench_contrib <- bind_rows(
+  voters |>
+    filter(radicalright == 1) |>
+    count(class5, wt = weight_an) |>
+    mutate(party = "Radical right", p_class_party = n / sum(n)),
+  voters |>
+    filter(socialist == 1) |>
+    count(class5, wt = weight_an) |>
+    mutate(party = "Socialist", p_class_party = n / sum(n))
+) |>
+  select(party, class5, p_class_party) |>
+  pivot_wider(names_from = party, values_from = p_class_party,
+              names_prefix = "p_class_given_")
+
+benchmark_class <- bench_loyalty |>
+  left_join(bench_contrib, by = "class5")
+
+benchmark_class |>
+  tt(digits = 3)
+
+```
+
+# Model 0: pooled five-class model
+
+## Model
+
+For each party family, the outcome model is
+
+$$
+Y_i \sim \operatorname{Bernoulli}(p_i), \qquad
+\operatorname{logit}(p_i)=\alpha_{k[i]},
+$$
+
+with one parameter per class (**index coding**, `~ 0 + class5`). Index coding is preferable to dummy coding here: every class receives the same prior, so no class is privileged as the reference category, and $P(Y=1\mid k)=\operatorname{logit}^{-1}(\alpha_k)$ directly.
+
+The class distribution among voters is estimated with a weighted intercept-only categorical model,
+
+$$
+K_i \sim \operatorname{Categorical}(\boldsymbol{\pi}), \qquad
+\boldsymbol{\pi}=\operatorname{softmax}(0,\gamma_2,\ldots,\gamma_5),
+$$
+
+which is the five-class analogue of the worker-prevalence model `m_worker` in the main analysis.
+
+## Priors
+
+The loyalty priors reuse the intercept priors from the dichotomous analysis, now applied to each class: `normal(-2, 1)` for the radical right and `normal(-1.1, 0.6)` for socialists. Because every class has the same prior, the implied prior for any class difference is centred on zero. The class-distribution model uses `normal(0, 1.5)` for the log-odds of each class relative to the higher-grade service class.
+
+```{r}
+#| label: priors
+
+pri_rr_class  <- prior(normal(-2, 1), class = "b")
+pri_soc_class <- prior(normal(-1.1, 0.6), class = "b")
+
+pri_prev <- get_prior(
+  class5 | weights(w) ~ 1,
+  data = voters,
+  family = categorical()
+)
+pri_prev$prior[pri_prev$class == "Intercept"] <- "normal(0, 1.5)"
+pri_prev
+
+```
+
+## Prior predictive check
+
+With index coding and an intercept-only categorical model, the implied priors can be simulated directly without calling Stan. The plot shows the prior for loyalty and the prior for contribution that results from combining the loyalty and class-distribution priors.
+
+```{r}
+#| label: prior-predictive
+
+n_sim <- 4000
+
+sim_prior <- function(mu, sigma, party) {
+  alpha <- matrix(rnorm(n_sim * 5, mu, sigma), ncol = 5)
+  gamma <- cbind(0, matrix(rnorm(n_sim * 4, 0, 1.5), ncol = 4))
+  p_class <- exp(gamma) / rowSums(exp(gamma))
+  p_party_class <- plogis(alpha)
+  joint <- p_party_class * p_class
+  p_class_party <- joint / rowSums(joint)
+
+  bind_rows(
+    tibble(quantity = "Loyalty: P(party | class)",
+           value = as.vector(p_party_class)),
+    tibble(quantity = "Contribution: P(class | party)",
+           value = as.vector(p_class_party))
+  ) |>
+    mutate(party = party)
+}
+
+bind_rows(
+  sim_prior(-2, 1, "Radical right"),
+  sim_prior(-1.1, 0.6, "Socialist")
+) |>
+  ggplot(aes(x = value)) +
+  stat_halfeye(fill = "grey80", color = "grey40") +
+  facet_grid(party ~ quantity) +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 1)) +
+  labs(x = "Prior predictive probability", y = NULL)
+
+```
+
+## Fit the models
+
+```{r}
+#| label: fit-m0
+#| results: hide
+
+# One helper for all fits, using the sampler settings of the main analysis
+fit_brm <- function(formula, data, prior, file, family = bernoulli()) {
+  brm(
+    formula = formula,
+    data = data,
+    family = family,
+    prior = prior,
+    backend = "cmdstanr",
+    threads = threading(4),
+    chains = 4,
+    cores = 4,
+    iter = 2000,
+    warmup = 1000,
+    seed = 2026,
+    control = list(adapt_delta = 0.95),
+    file = here("models", file)
+  )
+}
+
+m0_rr_class <- fit_brm(
+  radicalright | weights(w) ~ 0 + class5,
+  data = voters, prior = pri_rr_class,
+  file = "ess11_class5_m0_rr"
+)
+
+m0_soc_class <- fit_brm(
+  socialist | weights(w) ~ 0 + class5,
+  data = voters, prior = pri_soc_class,
+  file = "ess11_class5_m0_soc"
+)
+
+m_class <- fit_brm(
+  class5 | weights(w) ~ 1,
+  data = voters, prior = pri_prev,
+  family = categorical(),
+  file = "ess11_class5_prevalence")
+
+```
+
+```{r}
+#| label: m0-summaries
+
+summary(m0_rr_class)
+summary(m0_soc_class)
+summary(m_class)
+
+```
+
+## Posterior predictive checks
+
+The grouped bar check asks whether the model reproduces the vote share in each class.
+
+```{r}
+#| label: ppc-m0
+
+pp_check(m0_rr_class, type = "bars_grouped", group = "class5", ndraws = 200)
+pp_check(m0_soc_class, type = "bars_grouped", group = "class5", ndraws = 200)
+
+```
+
+## Derive loyalty and contribution
+
+All quantities are computed draw by draw. The loyalty draws and the class-distribution draws come from independently fitted models, so joining them by `.draw` yields draws from the joint posterior.
+
+```{r}
+#| label: derive-m0
+
+nd_class <- tibble(
+  class5 = factor(class_levels, levels = class_levels),
+  w = 1
+)
+
+prev_draws <- m_class |>
+  epred_draws(newdata = tibble(w = 1)) |>
+  ungroup() |>
+  transmute(
+    .draw,
+    class5 = factor(as.character(.category), levels = class_levels),
+    p_class = .epred
+  )
+
+loyalty_draws <- function(fit) {
+  fit |>
+    epred_draws(newdata = nd_class) |>
+    ungroup() |>
+    select(.draw, class5, p_party_class = .epred)
+}
+
+# Derive all class-specific quantities from P(party | class) and P(class)
+derive_class_quantities <- function(loyalty, prevalence) {
+  loyalty |>
+    inner_join(prevalence, by = c(".draw", "class5")) |>
+    group_by(.draw) |>
+    mutate(
+      p_joint       = p_party_class * p_class,
+      p_party       = sum(p_joint),
+      p_class_party = p_joint / p_party,               # contribution
+      rep_ratio     = p_class_party / p_class,         # = p_party_class / p_party
+      p_party_rest  = (p_party - p_joint) / (1 - p_class),
+      gap_rest      = p_party_class - p_party_rest,    # P(P|k) - P(P|not k)
+      gap_ref       = p_party_class - p_party_class[class5 == class_levels[1]]
+    ) |>
+    ungroup()
+}
+
+post_class <- bind_rows(
+  derive_class_quantities(loyalty_draws(m0_rr_class), prev_draws) |>
+    mutate(party = "Radical right"),
+  derive_class_quantities(loyalty_draws(m0_soc_class), prev_draws) |>
+    mutate(party = "Socialist")
+)
+
+post_class |>
+  pivot_longer(
+    c(p_party_class, p_class, p_class_party, rep_ratio, gap_rest, gap_ref),
+    names_to = "quantity", values_to = "value"
+  ) |>
+  mutate(quantity = factor(quantity, levels = c(
+    "p_party_class", "p_class", "p_class_party",
+    "rep_ratio", "gap_rest", "gap_ref"
+  ))) |>
+  group_by(party, quantity, class5) |>
+  median_qi(value, .width = .95) |>
+  select(party, quantity, class5, value, .lower, .upper) |>
+  arrange(party, quantity, class5) |>
+  tt(digits = 3)
+
+```
+
+## Posterior versus descriptive benchmark
+
+```{r}
+#| label: benchmark-comparison
+
+post_class |>
+  group_by(party, class5) |>
+  summarise(
+    loyalty_post      = median(p_party_class),
+    contribution_post = median(p_class_party),
+    .groups = "drop"
+  ) |>
+  left_join(
+    benchmark_class |>
+      pivot_longer(
+        c(p_rr_class, p_soc_class),
+        names_to = "party", values_to = "loyalty_desc"
+      ) |>
+      mutate(
+        party = if_else(party == "p_rr_class", "Radical right", "Socialist"),
+        contribution_desc = if_else(
+          party == "Radical right",
+          `p_class_given_Radical right`,
+          p_class_given_Socialist
+        )
+      ) |>
+      select(party, class5, loyalty_desc, contribution_desc),
+    by = c("party", "class5")
+  ) |>
+  relocate(loyalty_desc, .after = loyalty_post) |>
+  tt(digits = 3)
+
+```
+
+## Consistency check with the dichotomous analysis
+
+Collapsing skilled and low-skilled workers must reproduce the worker/non-worker quantities of the main analysis. This is a useful check that both documents describe the same sample and the same table:
+
+$$
+P(P\mid W)=\frac{\sum_{k\in W}P(P\mid k)P(k)}{\sum_{k\in W}P(k)},\qquad
+P(W\mid P)=\sum_{k\in W}P(k\mid P).
+$$
+
+```{r}
+#| label: consistency-dichotomous
+
+collapsed <- post_class |>
+  mutate(is_worker = class5 %in% worker_classes) |>
+  group_by(party, .draw) |>
+  summarise(
+    p_worker          = sum(p_class[is_worker]),
+    p_party_worker    = sum(p_joint[is_worker]) / sum(p_class[is_worker]),
+    p_party_nonworker = sum(p_joint[!is_worker]) / sum(p_class[!is_worker]),
+    p_worker_party    = sum(p_class_party[is_worker]),
+    .groups = "drop"
+  )
+
+collapsed |>
+  pivot_longer(-c(party, .draw), names_to = "quantity", values_to = "value") |>
+  group_by(party, quantity) |>
+  median_qi(value, .width = .95) |>
+  select(party, quantity, value, .lower, .upper) |>
+  tt(digits = 3)
+
+# Compare with the dichotomous radical-right model, if it has been fitted
+if (file.exists(here("models", "ess11_m0.rds")) &&
+    file.exists(here("models", "ess11_m_worker.rds"))) {
+  m0_dich <- readRDS(here("models", "ess11_m0.rds"))
+  m_worker_dich <- readRDS(here("models", "ess11_m_worker.rds"))
+
+  as_draws_df(m0_dich) |>
+    as_tibble() |>
+    select(.draw, alpha = b_Intercept, beta = b_worker) |>
+    inner_join(
+      as_draws_df(m_worker_dich) |> as_tibble() |>
+        select(.draw, gamma = b_Intercept),
+      by = ".draw"
+    ) |>
+    transmute(
+      p_worker = plogis(gamma),
+      p_party_worker = plogis(alpha + beta),
+      p_party_nonworker = plogis(alpha),
+      p_worker_party = p_party_worker * p_worker /
+        (p_party_worker * p_worker + p_party_nonworker * (1 - p_worker))
+    ) |>
+    pivot_longer(everything(), names_to = "quantity", values_to = "value") |>
+    group_by(quantity) |>
+    median_qi(value, .width = .95) |>
+    mutate(source = "Dichotomous model (radical right)") |>
+    select(source, quantity, value, .lower, .upper) |>
+    tt(digits = 3)
+}
+
+```
+
+# Plots
+
+## Loyalty by class
+
+```{r}
+#| label: plot-loyalty-class
+#| fig-height: 6
+
+post_class |>
+  mutate(class5 = fct_rev(fct_relabel(class5, ~ unname(class_labels[.x])))) |>
+  ggplot(aes(x = p_party_class, y = class5)) +
+  stat_halfeye(
+    point_interval = median_qi,
+    .width = c(.80, .95),
+    fill = "grey80",
+    color = "grey40"
+  ) +
+  facet_wrap(~ party, scales = "free_x") +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 1)) +
+  labs(
+    x = "Loyalty: P(party | class)",
+    y = NULL,
+    caption = "Posterior median with 80% and 95% credible intervals; pooled Model 0"
+  )
+
+ggsave(here("figs", "class5_loyalty.png"),
+       width = 10, height = 6, dpi = 300, bg = "white")
+
+```
+
+## Loyalty gap relative to all other classes
+
+This is the direct five-class analogue of the worker/non-worker gap.
+
+```{r}
+#| label: plot-gap-class
+#| fig-height: 6
+
+post_class |>
+  mutate(class5 = fct_rev(fct_relabel(class5, ~ unname(class_labels[.x])))) |>
+  ggplot(aes(x = gap_rest, y = class5)) +
+  stat_halfeye(
+    point_interval = median_qi,
+    .width = c(.80, .95),
+    fill = "grey80",
+    color = "grey40"
+  ) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  facet_wrap(~ party, scales = "free_x") +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 1)) +
+  labs(
+    x = "P(party | class) − P(party | all other classes)",
+    y = NULL,
+    caption = "Posterior median with 80% and 95% credible intervals; pooled Model 0"
+  )
+
+ggsave(here("figs", "class5_loyalty_gap.png"),
+       width = 10, height = 6, dpi = 300, bg = "white")
+
+```
+
+## Contribution: class composition of each electorate
+
+The class composition of each party's electorate is shown next to the class composition of all voters in the sample. The distance between the two is what the representation ratio summarises.
+
+```{r}
+#| label: plot-contribution-class
+#| fig-height: 6
+
+composition <- bind_rows(
+  prev_draws |>
+    transmute(.draw, class5, value = p_class, group = "All voters"),
+  post_class |>
+    transmute(.draw, class5, value = p_class_party, group = party)
+) |>
+  mutate(
+    class5 = fct_rev(fct_relabel(class5, ~ unname(class_labels[.x]))),
+    group = factor(group, levels = c("All voters", "Radical right", "Socialist"))
+  )
+
+composition |> 
+  filter(group != "All voters") |> 
+  ggplot(aes(x = value, y = class5, colour = group)) +
+  stat_pointinterval(
+    point_interval = median_qi,
+    .width = c(.80, .95),
+    position = position_dodge(width = 0.6)
+  ) +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 1)) +
+  labs(
+    x = "Contribution: P(class | party)",
+    y = NULL,
+    colour = NULL,
+    caption = "Posterior median with 80% and 95% credible intervals; pooled Model 0"
+  ) +
+  theme(legend.position = "bottom")
+
+ggsave(here("figs", "class5_contribution.png"),
+       width = 10, height = 6, dpi = 300, bg = "white")
+
+```
+
+## Representation ratio
+
+Values above one indicate that a class is over-represented in the party's electorate relative to its share among voters. Because the ratio also equals $P(P\mid k)/P(P)$, it can be read as relative loyalty. A log scale makes over- and under-representation symmetric.
+
+```{r}
+#| label: plot-representation-ratio
+#| fig-height: 6
+
+post_class |>
+  mutate(class5 = fct_rev(fct_relabel(class5, ~ unname(class_labels[.x])))) |>
+  ggplot(aes(x = rep_ratio, y = class5)) +
+  stat_halfeye(
+    point_interval = median_qi,
+    .width = c(.80, .95),
+    fill = "grey80",
+    color = "grey40"
+  ) +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  facet_wrap(~ party) +
+  scale_x_log10(breaks = c(0.5, 0.75, 1, 1.5, 2)) +
+  labs(
+    x = "Representation ratio: P(class | party) / P(class)  (log scale)",
+    y = NULL,
+    caption = "Posterior median with 80% and 95% credible intervals; pooled Model 0"
+  )
+
+ggsave(here("figs", "class5_representation_ratio.png"),
+       width = 10, height = 6, dpi = 300, bg = "white")
+
+```
+
+## Loyalty versus contribution
+
+Each point is one class. The plot makes visible that a class can be highly loyal without contributing much (because it is small), and that a large class can contribute heavily with only average loyalty.
+
+```{r}
+#| label: plot-loyalty-contribution-class
+#| fig-height: 6
+
+scatter_class <- post_class |>
+  group_by(party, class5) |>
+  summarise(
+    loyalty_med = median(p_party_class),
+    loyalty_lo  = quantile(p_party_class, .10),
+    loyalty_hi  = quantile(p_party_class, .90),
+    contrib_med = median(p_class_party),
+    contrib_lo  = quantile(p_class_party, .10),
+    contrib_hi  = quantile(p_class_party, .90),
+    .groups = "drop"
+  ) |>
+  mutate(label = class_labels[as.character(class5)])
+
+scatter_class |>
+  ggplot(aes(x = loyalty_med, y = contrib_med)) +
+  geom_errorbar(aes(xmin = loyalty_lo, xmax = loyalty_hi),
+                width = 0, orientation = "y", colour = "grey60") +
+  geom_errorbar(aes(ymin = contrib_lo, ymax = contrib_hi),
+                width = 0, colour = "grey60") +
+  geom_point(size = 2.5) +
+  {
+    if (requireNamespace("ggrepel", quietly = TRUE)) {
+      ggrepel::geom_text_repel(aes(label = label), size = 3.5,
+                               seed = 2026, max.overlaps = Inf)
+    } else {
+      geom_text(aes(label = label), vjust = -0.9, size = 3.5)
+    }
+  } +
+  facet_wrap(~ party, scales = "free") +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 1)) +
+  scale_y_continuous(labels = scales::label_percent(accuracy = 1)) +
+  labs(
+    x = "Loyalty: P(party | class)",
+    y = "Contribution: P(class | party)",
+    caption = "Posterior medians with 80% credible intervals; pooled Model 0"
+  )
+
+ggsave(here("figs", "class5_scatter_loyalty_contribution.png"),
+       width = 10, height = 6, dpi = 300, bg = "white")
+
+```
+
+# Adjusted loyalty: country intercepts and covariates
+
+The pooled Model 0 answers a descriptive question about the ten-country population. Part of the class differences in loyalty may reflect **composition**: classes are unevenly distributed across countries with very different levels of radical-right and socialist support, and they differ in age, gender, marital status, and migration background.
+
+Model 3 in the main analysis addressed this with a varying worker slope. With five classes, varying class slopes across ten countries would be poorly identified for small business owners, so this model keeps the class effects common and adds country intercepts plus the Model 3 covariates:
+
+$$
+\operatorname{logit}(p_{ic})=\alpha_{k[i]}+\alpha_c+\mathbf{x}_i'\boldsymbol\beta,
+\qquad \alpha_c\sim N(0,\sigma_c).
+$$
+
+Only **loyalty** is adjusted. Contribution is a statement about the actual composition of an electorate; an "adjusted" composition has no clear substantive meaning.
+
+## Priors
+
+The class parameters receive the Model 3 intercept prior (`normal(-2.3, 0.7)` for the radical right). For socialists, the prior is `normal(-1.1, 0.8)`, i.e. the same location as the Model 0 socialist prior but somewhat wider, because the reference group now differs. Covariate priors are the same as in the main analysis. With index coding, every class receives the same prior, so class differences are not shrunk towards any particular class.
+
+```{r}
+#| label: adjusted-priors
+
+voters_adj <- voters |>
+  mutate(
+    age_grp_fct = relevel(factor(age_grp_fct), ref = "18-29"),
+    gndr_fct    = relevel(factor(gndr_fct), ref = "men"),
+    married     = relevel(factor(married), ref = "at one point")
+  )
+
+# Check the coefficient names before assigning priors
+get_prior(
+  radicalright | weights(w) ~
+    0 + class5 + age_grp_fct + gndr_fct + married + immigrant + (1 | cntry),
+  data = voters_adj,
+  family = bernoulli()
+)
+
+covariate_priors <- c(
+  prior(normal(0, 0.5), class = "b", coef = "age_grp_fct30M65"),
+  prior(normal(0, 0.5), class = "b", coef = "age_grp_fctabove65"),
+  prior(normal(0, 0.5), class = "b", coef = "gndr_fctwomen"),
+  prior(normal(0, 0.5), class = "b", coef = "immigrant"),
+  prior(normal(0, 0.5), class = "b", coef = "marriednever"),
+  prior(exponential(2), class = "sd")
+)
+
+# The general class-"b" prior applies to the five class parameters;
+# the coefficient-specific priors above override it for the covariates.
+pri_rr_adj  <- c(prior(normal(-2.3, 0.7), class = "b"), covariate_priors)
+pri_soc_adj <- c(prior(normal(-1.1, 0.8), class = "b"), covariate_priors)
+
+```
+
+## Fit
+
+```{r}
+#| label: adjusted-fit
+#| results: hide
+
+m3_rr_class <- fit_brm(
+  radicalright | weights(w) ~
+    0 + class5 + age_grp_fct + gndr_fct + married + immigrant + (1 | cntry),
+  data = voters_adj, prior = pri_rr_adj,
+  file = "ess11_class5_m3_rr"
+)
+
+m3_soc_class <- fit_brm(
+  socialist | weights(w) ~
+    0 + class5 + age_grp_fct + gndr_fct + married + immigrant + (1 | cntry),
+  data = voters_adj, prior = pri_soc_adj,
+  file = "ess11_class5_m3_soc"
+)
+
+```
+
+```{r}
+#| label: adjusted-summaries
+
+summary(m3_rr_class)
+summary(m3_soc_class)
+pp_check(m3_rr_class, type = "bars_grouped", group = "class5", ndraws = 200)
+pp_check(m3_soc_class, type = "bars_grouped", group = "class5", ndraws = 200)
+
+```
+
+## Standardised predictions
+
+For each class $k$, every respondent is assigned to class $k$ while keeping their observed country and covariates, and the weighted mean predicted probability is computed. Country intercepts are included (`re_formula = NULL`), so the standardisation averages over the actual country distribution of the ten-country population rather than setting country effects to zero. The same posterior draws are used for all five classes, so class contrasts are computed draw by draw.
+
+To keep memory use manageable, the calculation uses the draw-by-observation matrix from `posterior_epred()` and a weighted matrix product rather than a long tidy data frame.
+
+```{r}
+#| label: adjusted-standardised
+
+standardise_class <- function(fit, data, n_draws = 1000) {
+  set.seed(2026)
+  draw_ids <- sample(ndraws(fit), n_draws)
+  w <- data$w / sum(data$w)
+
+  map_dfr(class_levels, function(k) {
+    nd <- data |> mutate(class5 = factor(k, levels = class_levels))
+    ep <- posterior_epred(fit, newdata = nd, re_formula = NULL,
+                          draw_ids = draw_ids)
+    tibble(
+      .draw = draw_ids,
+      class5 = factor(k, levels = class_levels),
+      p_std = as.vector(ep %*% w)
+    )
+  })
+}
+
+std_class <- bind_rows(
+  standardise_class(m3_rr_class, voters_adj) |> mutate(party = "Radical right"),
+  standardise_class(m3_soc_class, voters_adj) |> mutate(party = "Socialist")
+) |>
+  group_by(party, .draw) |>
+  mutate(gap_ref = p_std - p_std[class5 == class_levels[1]]) |>
+  ungroup()
+
+std_class |>
+  pivot_longer(c(p_std, gap_ref), names_to = "quantity", values_to = "value") |>
+  group_by(party, quantity, class5) |>
+  median_qi(value, .width = .95) |>
+  select(party, quantity, class5, value, .lower, .upper) |>
+  tt(digits = 3)
+
+```
+
+## Unadjusted versus adjusted loyalty
+
+If the class profile of loyalty is largely unchanged after adjustment, the pooled class differences are not simply an artefact of country composition or of the demographic profile of the classes.
+
+```{r}
+#| label: plot-adjusted-vs-unadjusted
+#| fig-height: 6
+
+bind_rows(
+  post_class |>
+    transmute(party, class5, value = p_party_class,
+              model = "Unadjusted (Model 0)"),
+  std_class |>
+    transmute(party, class5, value = p_std,
+              model = "Adjusted (country + covariates)")
+) |>
+  mutate(
+    class5 = fct_rev(fct_relabel(class5, ~ unname(class_labels[.x]))),
+    model = fct_inorder(model)
+  ) |>
+  ggplot(aes(x = value, y = class5, colour = model)) +
+  stat_pointinterval(
+    point_interval = median_qi,
+    .width = c(.80, .95),
+    position = position_dodge(width = 0.5)
+  ) +
+  facet_wrap(~ party, scales = "free_x") +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 1)) +
+  labs(
+    x = "Loyalty: P(party | class)",
+    y = NULL,
+    colour = NULL,
+    caption = "Posterior median with 80% and 95% credible intervals"
+  ) +
+  theme(legend.position = "bottom")
+
+ggsave(here("figs", "class5_loyalty_adjusted.png"),
+       width = 10, height = 6, dpi = 300, bg = "white")
+
+```
+
+# Sensitivity to weighting
+
+As in the main analysis, the pooled models are refitted without weights. The comparison covers both loyalty and contribution, since contribution additionally depends on the weighted class distribution.
+
+```{r}
+#| label: weighting-sensitivity
+#| results: hide
+
+m0_rr_class_uw <- fit_brm(
+  radicalright ~ 0 + class5,
+  data = voters, prior = pri_rr_class,
+  file = "ess11_class5_m0_rr_unweighted"
+)
+
+m0_soc_class_uw <- fit_brm(
+  socialist ~ 0 + class5,
+  data = voters, prior = pri_soc_class,
+  file = "ess11_class5_m0_soc_unweighted"
+)
+
+pri_prev_uw <- get_prior(class5 ~ 1, data = voters, family = categorical())
+pri_prev_uw$prior[pri_prev_uw$class == "Intercept"] <- "normal(0, 1.5)"
+
+m_class_uw <- fit_brm(
+  class5 ~ 1,
+  data = voters, prior = pri_prev_uw,
+  family = categorical(),
+  file = "ess11_class5_prevalence_unweighted"
+)
+
+```
+
+```{r}
+#| label: weighting-sensitivity-compare
+#| fig-height: 7
+
+prev_draws_uw <- m_class_uw |>
+  epred_draws(newdata = tibble(w = 1)) |>
+  ungroup() |>
+  transmute(
+    .draw,
+    class5 = factor(as.character(.category), levels = class_levels),
+    p_class = .epred
+  )
+
+post_class_uw <- bind_rows(
+  derive_class_quantities(loyalty_draws(m0_rr_class_uw), prev_draws_uw) |>
+    mutate(party = "Radical right"),
+  derive_class_quantities(loyalty_draws(m0_soc_class_uw), prev_draws_uw) |>
+    mutate(party = "Socialist")
+)
+
+bind_rows(
+  post_class    |> mutate(model = "Weighted"),
+  post_class_uw |> mutate(model = "Unweighted")
+) |>
+  select(model, party, class5, .draw,
+         Loyalty = p_party_class, Contribution = p_class_party) |>
+  pivot_longer(c(Loyalty, Contribution),
+               names_to = "quantity", values_to = "value") |>
+  mutate(
+    class5 = fct_rev(fct_relabel(class5, ~ unname(class_labels[.x]))),
+    quantity = fct_inorder(quantity)
+  ) |>
+  ggplot(aes(x = value, y = class5, colour = model)) +
+  stat_pointinterval(
+    point_interval = median_qi,
+    .width = c(.80, .95),
+    position = position_dodge(width = 0.5)
+  ) +
+  facet_grid(party ~ quantity, scales = "free_x") +
+  scale_x_continuous(labels = scales::label_percent(accuracy = 1)) +
+  labs(x = NULL, y = NULL, colour = NULL,
+       caption = "Posterior median with 80% and 95% credible intervals; pooled Model 0") +
+  theme(legend.position = "bottom")
+
+```
+
+# Summary
+
+The five-class analysis keeps the estimands of the main analysis — loyalty $P(P\mid k)$ and contribution $P(k\mid P)$ — and derives both from the same posterior draws. It adds three things to the dichotomous analysis:
+
+1. It shows whether the worker category is internally homogeneous: do skilled and low-skilled workers differ in loyalty and in their share of each electorate?
+2. It shows where the non-worker loyalty comes from: the "non-worker" baseline mixes the higher and lower service classes with small business owners, who may behave very differently, particularly with respect to the radical right.
+3. The representation ratio $P(k\mid P)/P(k)=P(P\mid k)/P(P)$ makes explicit why loyalty and contribution can diverge: contribution is relative loyalty multiplied by class size.
+
+The collapsed five-class estimates reproduce the worker/non-worker quantities, so the two documents are directly comparable.
